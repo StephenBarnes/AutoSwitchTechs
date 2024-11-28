@@ -131,7 +131,7 @@ end
 
 local function getLabSciencesAvailable(labs)
 	-- Returns a table mapping science pack names to true/false for whether enough labs have that pack.
-	-- Returns nil if no labs.
+	-- Assumes there's at least 1 lab. Caller checks for case where there's no labs.
 	local numLabs = 0
 	local sciPackAmounts = {} -- maps name of science pack to number of labs that have it
 	for _, labList in pairs(labs) do

@@ -61,14 +61,17 @@ local function alertForce(force, message, anyLab)
 	end
 end
 
-local function maybeWarn(force, warning, anyLab)
-	-- Warn force, if they haven't already been warned within the alert timeout setting.
-	if not SHOW_WARNINGS() then return end
+local function canWarnNow(force)
+	-- Returns true if we can issue a warning to the force now, else false.
+	-- There's a setting to not warn more than once every N seconds.
+	if not SHOW_WARNINGS() then return false end
 	local lastWarnTime = getLastWarnTime(force)
-	if lastWarnTime == nil or lastWarnTime + WARN_EVERY_N_TICKS() < game.tick then
-		updateLastWarnTime(force)
-		alertForce(force, warning, anyLab)
-	end
+	return (lastWarnTime == nil) or (lastWarnTime + WARN_EVERY_N_TICKS() < game.tick)
+end
+
+local function warnForce(force, warning, anyLab)
+	updateLastWarnTime(force)
+	alertForce(force, warning, anyLab)
 end
 
 ------------------------------------------------------------------------
@@ -147,11 +150,33 @@ end
 
 local function handleEmptyResearchQueue(force)
 	-- If research queue is empty, first check if they have any labs. If they do, warn about empty queue.
-	if not SHOW_WARNINGS() then return end
+	if not canWarnNow(force) then return end
 	local forceLab = getAnyLab(force)
 	if forceLab ~= nil then
-		maybeWarn(force, {"message.empty-research-queue"}, forceLab)
+		warnForce(force, {"message.empty-research-queue"}, forceLab)
 	end
+end
+
+local function handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAvailable)
+	-- Handle situation where none of the techs in the queue have all their science packs available.
+	-- Look through the list of techs in the queue, and collect list of unavailable science packs that they need.
+	if not canWarnNow(force) then return end
+	-- TODO make list of sciences
+	local missingSciences = {}
+	for _, annotatedTech in pairs(annotatedQueue) do
+		if not annotatedTech.available and not annotatedTech.hasPrereqInQueue then
+			for _, sciPack in pairs(annotatedTech.tech.research_unit_ingredients) do
+				if not sciencesAvailable[sciPack.name] then
+					missingSciences[sciPack.name] = true
+				end
+			end
+		end
+	end
+	local scienceString = ""
+	for sciPack, _ in pairs(missingSciences) do
+		scienceString = scienceString .. "[img=item/" .. sciPack .. "] "
+	end
+	warnForce(force, {"message.no-techs-available", scienceString}, anyLab)
 end
 
 local function switchToTech(force, targetTechIndex, anyLab)
@@ -245,7 +270,7 @@ local function updateResearchQueueForForce(force)
 	end
 
 	-- If we reach this point, there are no available techs.
-	maybeWarn(force, {"message.no-techs-available"}, anyLab)
+	handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAvailable)
 end
 
 local function updateResearchQueue(nthTickEventData)

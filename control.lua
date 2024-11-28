@@ -1,3 +1,4 @@
+local scienceAlertIcon = { type = "virtual", name = "AutoTechSwitch-science-alert" }
 
 -- Startup settings
 local RUN_EVERY_N_TICKS = 60 * settings.startup["AutoSwitchTechs-run-every-n-seconds"].value
@@ -54,7 +55,11 @@ local function maybeWarn(force, warning)
 	if not SHOW_WARNINGS() then return end
 	local lastWarnTime = getLastWarnTime(force)
 	if lastWarnTime == nil or lastWarnTime + WARN_EVERY_N_TICKS() < game.tick then
-		force.print(warning)
+		for _, player in pairs(force.players) do
+			if player ~= nil and player.valid then
+				player.add_custom_alert(player.character, scienceAlertIcon, warning, false)
+			end
+		end
 		updateLastWarnTime(force)
 	end
 end
@@ -163,7 +168,12 @@ local function switchToTech(force, targetTechIndex)
 		else
 			newTechName = {"", newQueue[1].localised_name, " ", (newQueue[1].level or "")}
 		end
-		force.print({"message.switched-to-tech", newTechName})
+		local alertMessage = {"message.switched-to-tech", newTechName}
+		for _, player in pairs(force.players) do
+			if player ~= nil and player.valid then
+				player.add_custom_alert(player.character, scienceAlertIcon, alertMessage, false)
+			end
+		end
 	end
 end
 

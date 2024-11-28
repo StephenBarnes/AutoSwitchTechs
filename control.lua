@@ -51,16 +51,23 @@ local function updateLastWarnTime(force)
 	global.lastWarnTimes[force.index] = game.tick
 end
 
-local function maybeWarn(force, warning)
+local function alertForce(force, message, anyLab)
+	-- Send an alert to every player on the force.
+	-- anyLab is any lab of the force, required by the game's alert system.
+	for _, player in pairs(force.players) do
+		if player ~= nil and player.valid then
+			player.add_custom_alert(anyLab, scienceAlertIcon, message, false)
+		end
+	end
+end
+
+local function maybeWarn(force, warning, anyLab)
+	-- Warn force, if they haven't already been warned within the alert timeout setting.
 	if not SHOW_WARNINGS() then return end
 	local lastWarnTime = getLastWarnTime(force)
 	if lastWarnTime == nil or lastWarnTime + WARN_EVERY_N_TICKS() < game.tick then
-		for _, player in pairs(force.players) do
-			if player ~= nil and player.valid then
-				player.add_custom_alert(player.character, scienceAlertIcon, warning, false)
-			end
-		end
 		updateLastWarnTime(force)
+		alertForce(force, warning, anyLab)
 	end
 end
 
@@ -79,24 +86,23 @@ local function findLabsOfForce(force)
 	return labs
 end
 
-local function forceHasLabs(force)
+local function getAnyLab(force)
+	-- Returns any lab of the force, or nil if the force has no labs.
 	for _, surface in pairs(game.surfaces) do
 		local surfaceLabs = surface.find_entities_filtered({type="lab", force=force})
 		if #surfaceLabs ~= 0 then
-			return true
+			return surfaceLabs[1]
 		end
 	end
-	return false
+	return nil
 end
 
-local function getLabSciencesAvailable(force)
+local function getLabSciencesAvailable(labs)
 	-- Returns a table mapping science pack names to true/false for whether enough labs have that pack.
 	-- Returns nil if no labs.
-	local forceLabs = findLabsOfForce(force)
-	if #forceLabs == 0 then return nil end
 	local numLabs = 0
 	local sciPackAmounts = {} -- maps name of science pack to number of labs that have it
-	for _, labList in pairs(forceLabs) do
+	for _, labList in pairs(labs) do
 		numLabs = numLabs + #labList
 		for _, lab in pairs(labList) do
 			local inventory = lab.get_output_inventory()
@@ -142,14 +148,16 @@ end
 local function handleEmptyResearchQueue(force)
 	-- If research queue is empty, first check if they have any labs. If they do, warn about empty queue.
 	if not SHOW_WARNINGS() then return end
-	if forceHasLabs(force) then
-		maybeWarn(force, {"message.empty-research-queue"})
+	local forceLab = getAnyLab(force)
+	if forceLab ~= nil then
+		maybeWarn(force, {"message.empty-research-queue"}, forceLab)
 	end
 end
 
-local function switchToTech(force, targetTechIndex)
+local function switchToTech(force, targetTechIndex, anyLab)
 	-- Change research queue to put the specified tech at the start.
 	-- Can be called with index 1 to not switch techs.
+	-- anyLab argument is any lab of the force, used as target of the alert popup thing.
 	if targetTechIndex == 1 then return end
 	local queue = force.research_queue
 	local newQueue = {queue[targetTechIndex]}
@@ -169,11 +177,7 @@ local function switchToTech(force, targetTechIndex)
 			newTechName = {"", newQueue[1].localised_name, " ", (newQueue[1].level or "")}
 		end
 		local alertMessage = {"message.switched-to-tech", newTechName}
-		for _, player in pairs(force.players) do
-			if player ~= nil and player.valid then
-				player.add_custom_alert(player.character, scienceAlertIcon, alertMessage, false)
-			end
-		end
+		alertForce(force, alertMessage, anyLab)
 	end
 end
 
@@ -202,7 +206,10 @@ local function updateResearchQueueForForce(force)
 		return
 	end
 
-	local sciencesAvailable = getLabSciencesAvailable(force)
+	local forceLabs = findLabsOfForce(force)
+	if #forceLabs == 0 then return end
+	local anyLab = forceLabs[1][1]
+	local sciencesAvailable = getLabSciencesAvailable(forceLabs)
 	if sciencesAvailable == nil then return end
 
 	local queueHasPrioritizedTechs = false
@@ -223,7 +230,7 @@ local function updateResearchQueueForForce(force)
 	if queueHasPrioritizedTechs then
 		for i, annotatedTech in pairs(annotatedQueue) do
 			if (not annotatedTech.hasPrereqInQueue) and annotatedTech.available and annotatedTech.prioritize then
-				switchToTech(force, i)
+				switchToTech(force, i, anyLab)
 				return
 			end
 		end
@@ -232,13 +239,13 @@ local function updateResearchQueueForForce(force)
 	-- If there's no prioritized techs, find the first available tech and switch to it.
 	for i, annotatedTech in pairs(annotatedQueue) do
 		if (not annotatedTech.hasPrereqInQueue) and annotatedTech.available then
-			switchToTech(force, i)
+			switchToTech(force, i, anyLab)
 			return
 		end
 	end
 
 	-- If we reach this point, there are no available techs.
-	maybeWarn(force, {"message.no-techs-available"})
+	maybeWarn(force, {"message.no-techs-available"}, anyLab)
 end
 
 local function updateResearchQueue(nthTickEventData)

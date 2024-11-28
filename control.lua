@@ -5,6 +5,7 @@ local RUN_EVERY_N_TICKS = 60 * settings.startup["AutoSwitchTechs-run-every-n-sec
 
 -- Runtime settings - functions to fetch settings every time they're needed.
 local function PRIORITIZE_SPOILABLE_SCIENCE() return settings.global["AutoSwitchTechs-prioritize-spoilable-science"].value end
+local function PRIORITIZE_LATE_GAME_SCIENCE() return settings.global["AutoSwitchTechs-prioritize-late-game-science"].value end
 local function SCIENCE_AVAILABLE_THRESHOLD() return settings.global["AutoSwitchTechs-science-available-threshold"].value end
 local function NOTIFY_SWITCHES() return settings.global["AutoSwitchTechs-notify-switches"].value end
 local function SHOW_WARNINGS() return settings.global["AutoSwitchTechs-show-warnings"].value end
@@ -15,20 +16,47 @@ local function EARLY_GAME_THRESHOLD() return settings.global["AutoSwitchTechs-ea
 -- Constants to hold prototypes we fetch right at the start and then cache.
 local LABS = nil
 local SCIENCE_PACKS = nil
-local SPOILABLE_SCIENCE_PACKS = nil
 
 local function populateConstants()
 	LABS = prototypes.get_entity_filtered({{filter = "type", type = "lab"}})
 	SCIENCE_PACKS = {}
-	SPOILABLE_SCIENCE_PACKS = {}
 	for _, lab in pairs(LABS) do
 		for _, sciPackName in pairs(lab.lab_inputs) do
 			SCIENCE_PACKS[sciPackName] = true
-			if prototypes.item[sciPackName].get_spoil_ticks() ~= 0 then
-				SPOILABLE_SCIENCE_PACKS[sciPackName] = true
-			end
 		end
 	end
+end
+
+------------------------------------------------------------------------
+
+-- Table of priorities used for science packs when late-game priority is enabled.
+local lateGameness = {
+	["promethium-science-pack"] = 9,
+	["cryogenic-science-pack"] = 8,
+	["metallurgic-science-pack"] = 7,
+	["electromagnetic-science-pack"] = 7,
+	["agricultural-science-pack"] = 7,
+	["space-science-pack"] = 6,
+	["utility-science-pack"] = 5,
+	["production-science-pack"] = 5,
+	["chemical-science-pack"] = 4,
+	["military-science-pack"] = 3,
+	["logistic-science-pack"] = 2,
+	["automation-science-pack"] = 1,
+}
+
+local function getSciencePriority(sciPackName)
+	-- Returns a number for priority of the science pack. Higher numbers are higher priority.
+	-- Note this can change in the middle of a game, since we use runtime-global settings for priorities. So can't populate it with constants above.
+	if PRIORITIZE_SPOILABLE_SCIENCE() then
+		if prototypes.item[sciPackName].get_spoil_ticks() ~= 0 then
+			return 10
+		end
+	end
+	if PRIORITIZE_LATE_GAME_SCIENCE() then
+		return lateGameness[sciPackName] or 1
+	end
+	return 1
 end
 
 ------------------------------------------------------------------------
@@ -70,6 +98,7 @@ local function canWarnNow(force)
 end
 
 local function warnForce(force, warning, anyLab)
+	-- Issue a warning, for empty research queue or no techs available. Switching techs is not considered a warning.
 	updateLastWarnTime(force)
 	alertForce(force, warning, anyLab)
 end
@@ -139,13 +168,12 @@ local function techHasSciencesAvailable(tech, sciencesAvailable)
 	return true
 end
 
-local function techHasSpoilableSciences(tech)
+local function getTechPriority(tech)
+	local maxPriority = 0
 	for _, sciPack in pairs(tech.research_unit_ingredients) do
-		if SPOILABLE_SCIENCE_PACKS[sciPack.name] == true then
-			return true
-		end
+		maxPriority = math.max(maxPriority, getSciencePriority(sciPack.name))
 	end
-	return false
+	return maxPriority
 end
 
 local function handleEmptyResearchQueue(force)
@@ -155,6 +183,14 @@ local function handleEmptyResearchQueue(force)
 	if forceLab ~= nil then
 		warnForce(force, {"message.empty-research-queue"}, forceLab)
 	end
+end
+
+local function makeScienceIconString(sciences)
+	local r = ""
+	for sciPack, _ in pairs(sciences) do
+		r = r .. "[img=item/" .. sciPack .. "] "
+	end
+	return r
 end
 
 local function handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAvailable)
@@ -172,14 +208,10 @@ local function handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAva
 			end
 		end
 	end
-	local scienceString = ""
-	for sciPack, _ in pairs(missingSciences) do
-		scienceString = scienceString .. "[img=item/" .. sciPack .. "] "
-	end
-	warnForce(force, {"message.no-techs-available", scienceString}, anyLab)
+	warnForce(force, {"message.no-techs-available", makeScienceIconString(missingSciences)}, anyLab)
 end
 
-local function switchToTech(force, targetTechIndex, anyLab)
+local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, sciencesAvailable)
 	-- Change research queue to put the specified tech at the start.
 	-- Can be called with index 1 to not switch techs.
 	-- anyLab argument is any lab of the force, used as target of the alert popup thing.
@@ -201,7 +233,29 @@ local function switchToTech(force, targetTechIndex, anyLab)
 		else
 			newTechName = {"", newQueue[1].localised_name, " ", (newQueue[1].level or "")}
 		end
-		local alertMessage = {"message.switched-to-tech", newTechName}
+
+		-- Figure out why we switched.
+		local switchReason
+		if not annotatedQueue[1].available then
+			local missingSciences = {}
+			for _, sciPack in pairs(annotatedQueue[1].tech.research_unit_ingredients) do
+				if not sciencesAvailable[sciPack.name] then
+					missingSciences[sciPack.name] = true
+				end
+			end
+			switchReason = {"message.switched-bc-first-tech-missing-science", makeScienceIconString(missingSciences)}
+		else
+			local switchTargetPriority = annotatedQueue[targetTechIndex].priority
+			local prioritizedSciences = {}
+			for _, sciPack in pairs(annotatedQueue[targetTechIndex].tech.research_unit_ingredients) do
+				if getSciencePriority(sciPack.name) == switchTargetPriority then
+					prioritizedSciences[sciPack.name] = true
+				end
+			end
+			switchReason = {"message.switched-bc-prioritized", makeScienceIconString(prioritizedSciences)}
+		end
+
+		local alertMessage = {"message.switched-to-tech", newTechName, switchReason}
 		alertForce(force, alertMessage, anyLab)
 	end
 end
@@ -237,40 +291,39 @@ local function updateResearchQueueForForce(force)
 	local sciencesAvailable = getLabSciencesAvailable(forceLabs)
 	if sciencesAvailable == nil then return end
 
-	local queueHasPrioritizedTechs = false
 	local annotatedQueue = {}
 	for i, tech in pairs(force.research_queue) do
 		local hasPrereqInQueue = checkIfTechHasPrereqInQueue(force.research_queue, i)
-		local prioritizeTech = (not hasPrereqInQueue) and PRIORITIZE_SPOILABLE_SCIENCE() and techHasSpoilableSciences(tech)
+		local available = techHasSciencesAvailable(tech, sciencesAvailable)
+		local priority
+		if hasPrereqInQueue or not available then
+			priority = 0
+		else
+			priority = getTechPriority(tech)
+		end
 		annotatedQueue[#annotatedQueue+1] = {
 			tech = tech,
-			available = techHasSciencesAvailable(tech, sciencesAvailable),
-			prioritize = prioritizeTech,
+			available = available,
+			priority = priority,
 			hasPrereqInQueue = hasPrereqInQueue,
 		}
-		if prioritizeTech then queueHasPrioritizedTechs = true end
 	end
 
-	-- If we're prioritizing some techs, and we have prioritized techs in the queue, first try switching to those.
-	if queueHasPrioritizedTechs then
-		for i, annotatedTech in pairs(annotatedQueue) do
-			if (not annotatedTech.hasPrereqInQueue) and annotatedTech.available and annotatedTech.prioritize then
-				switchToTech(force, i, anyLab)
-				return
-			end
-		end
-	end
-
-	-- If there's no prioritized techs, find the first available tech and switch to it.
+	-- Find tech with highest priority and switch to it.
+	local bestPriority = 0
+	local techIdxWithBestPriority = 0
 	for i, annotatedTech in pairs(annotatedQueue) do
-		if (not annotatedTech.hasPrereqInQueue) and annotatedTech.available then
-			switchToTech(force, i, anyLab)
-			return
+		if annotatedTech.priority > bestPriority then
+			bestPriority = annotatedTech.priority
+			techIdxWithBestPriority = i
 		end
 	end
-
-	-- If we reach this point, there are no available techs.
-	handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAvailable)
+	if techIdxWithBestPriority ~= 0 then
+		switchToTech(force, techIdxWithBestPriority, anyLab, annotatedQueue, sciencesAvailable)
+	else
+		-- If we reach this point, there are no available techs.
+		handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAvailable)
+	end
 end
 
 local function updateResearchQueue(nthTickEventData)
@@ -283,5 +336,3 @@ local function updateResearchQueue(nthTickEventData)
 end
 
 script.on_nth_tick(RUN_EVERY_N_TICKS, updateResearchQueue)
-
--- TODO add a setting to auto-queue the next research in a series when research finishes.

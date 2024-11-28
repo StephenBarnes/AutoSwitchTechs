@@ -5,9 +5,9 @@ Date: 28. 11. 2024
     - Tech switch notifications and warnings now use the in-game alerts system, not the chat.
     - Clicking on an alert will show one of your labs in map view.
     - Warnings when no tech in queue is researchable now show missing science packs.
-    - TODO Tech switch alerts show the reason for switching.
-    - TODO Removed dependency on Space Age.
-    - TODO Added option to prioritize late-game science packs.
+    - Removed dependency on Space Age.
+    - Added option to prioritize late-game science packs.
+    - Tech switch alerts show the reason for switching.
 ---------------------------------------------------------------------------------------------------
 Version: 1.0.0
 Date: 27. 11. 2024

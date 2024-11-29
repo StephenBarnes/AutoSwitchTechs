@@ -1,4 +1,4 @@
-local scienceAlertIcon = { type = "virtual", name = "AutoTechSwitch-science-alert" }
+local scienceAlertIcon = { type = "virtual", name = "AutoSwitchTechs-science-alert" }
 
 -- Startup settings
 local RUN_EVERY_N_TICKS = 60 * settings.startup["AutoSwitchTechs-run-every-n-seconds"].value
@@ -197,7 +197,6 @@ local function handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAva
 	-- Handle situation where none of the techs in the queue have all their science packs available.
 	-- Look through the list of techs in the queue, and collect list of unavailable science packs that they need.
 	if not canWarnNow(force) then return end
-	-- TODO make list of sciences
 	local missingSciences = {}
 	for _, annotatedTech in pairs(annotatedQueue) do
 		if not annotatedTech.available and not annotatedTech.hasPrereqInQueue then

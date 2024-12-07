@@ -1,7 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.3.0
+Date: 7. 12. 2024
+  Optimizations:
+    - Cache list of force's labs, and only search for them again after a lab is built or destroyed.
+---------------------------------------------------------------------------------------------------
 Version: 1.2.0
 Date: 7. 12. 2024
-  Locale:
+  Translation:
     - Added Russian translation by dodther.
 ---------------------------------------------------------------------------------------------------
 Version: 1.1.2

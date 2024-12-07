@@ -106,8 +106,9 @@ end
 ------------------------------------------------------------------------
 
 local function findLabsOfForce(force)
-	-- Returns list of lists of labs, because I'm guessing that's faster than concatenating into one list.
-	-- TODO if there's performance issues we can cache this per-force, mark forces as dirty if there's build events etc.
+	-- Looks at all surfaces and finds all labs of the force.
+	-- This is expensive! Can easily take like 70ms on a good computer, which is multiple frames. So prefer to use getLabsOfForce below, which uses a cache.
+	-- Returns list of lists of labs, because I'm guessing that's faster than inserting them one-by-one into one list.
 	local labs = {}
 	for _, surface in pairs(game.surfaces) do
 		local surfaceLabs = surface.find_entities_filtered({type="lab", force=force})
@@ -118,16 +119,33 @@ local function findLabsOfForce(force)
 	return labs
 end
 
-local function getAnyLab(force)
-	-- Returns any lab of the force, or nil if the force has no labs.
-	for _, surface in pairs(game.surfaces) do
-		local surfaceLabs = surface.find_entities_filtered({type="lab", force=force})
-		if #surfaceLabs ~= 0 then
-			return surfaceLabs[1]
-		end
+local function getLabsOfForce(force)
+	-- Gets list-of-lists of labs, using cache. This is faster than findLabsOfForce.
+	if not global then global = {} end
+	if not global.labsOfForce then global.labsOfForce = {} end
+	if global.labsOfForce[force.index] then
+		return global.labsOfForce[force.index]
+	else
+		local labs = findLabsOfForce(force)
+		global.labsOfForce[force.index] = labs
+		return labs
 	end
-	return nil
 end
+
+local function getAnyLabOfForce(force)
+	-- Returns any lab of the force, or nil if the force has no labs. Uses cache.
+	local labsOfForce = getLabsOfForce(force)
+	if #labsOfForce ~= 0 then return labsOfForce[1][1] end
+end
+
+local function invalidateLabCache(force)
+	-- Clears cache of labs of the force. Called when a lab is built or destroyed.
+	if not global then global = {} end
+	if not global.labsOfForce then global.labsOfForce = {} end
+	global.labsOfForce[force.index] = nil
+end
+
+------------------------------------------------------------------------
 
 local function getLabSciencesAvailable(labs)
 	-- Returns a table mapping science pack names to true/false for whether enough labs have that pack.
@@ -179,7 +197,7 @@ end
 local function handleEmptyResearchQueue(force)
 	-- If research queue is empty, first check if they have any labs. If they do, warn about empty queue.
 	if not canWarnNow(force) then return end
-	local forceLab = getAnyLab(force)
+	local forceLab = getAnyLabOfForce(force)
 	if forceLab ~= nil then
 		warnForce(force, {"message.empty-research-queue"}, forceLab)
 	end
@@ -284,7 +302,22 @@ local function updateResearchQueueForForce(force)
 		return
 	end
 
-	local forceLabs = findLabsOfForce(force)
+	--[[ For profiling, if you want to optimize further, uncomment this and comment out the next section.
+	local profiler = game.create_profiler()
+	profiler:reset()
+	local forceLabs = getLabsOfForce(force)
+	force.print(profiler)
+	force.print("-- for findLabsOfForce")
+	if #forceLabs == 0 then return end
+	local anyLab = forceLabs[1][1]
+	profiler:reset()
+	local sciencesAvailable = getLabSciencesAvailable(forceLabs)
+	force.print({"", "abc", profiler})
+	force.print("-- for getLabSciencesAvailable")
+	if sciencesAvailable == nil then return end
+	]]
+
+	local forceLabs = getLabsOfForce(force)
 	if #forceLabs == 0 then return end
 	local anyLab = forceLabs[1][1]
 	local sciencesAvailable = getLabSciencesAvailable(forceLabs)
@@ -335,3 +368,19 @@ local function updateResearchQueue(nthTickEventData)
 end
 
 script.on_nth_tick(RUN_EVERY_N_TICKS, updateResearchQueue)
+
+-- When a lab is built or destroyed, invalidate the cache of labs of the force. So next time they're needed, we'll re-find them using findLabsOfForce.
+for _, eventType in pairs({
+	defines.events.on_built_entity,
+	defines.events.on_player_mined_entity,
+	defines.events.on_robot_built_entity,
+	defines.events.on_robot_mined_entity,
+	defines.events.on_entity_died,
+}) do
+	script.on_event(eventType,
+		function(event)
+			---@cast event EventData.on_built_entity | EventData.on_player_mined_entity | EventData.on_robot_built_entity | EventData.on_robot_mined_entity | EventData.on_entity_died
+			invalidateLabCache(event.entity.force)
+		end,
+		{{ filter = "type", type = "lab" }})
+end

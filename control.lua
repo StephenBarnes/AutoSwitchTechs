@@ -138,11 +138,17 @@ local function getAnyLabOfForce(force)
 	if #labsOfForce ~= 0 then return labsOfForce[1][1] end
 end
 
+---@param force LuaForce
 local function invalidateLabCache(force)
 	-- Clears cache of labs of the force. Called when a lab is built or destroyed.
 	if not global then global = {} end
 	if not global.labsOfForce then global.labsOfForce = {} end
-	global.labsOfForce[force.index] = nil
+	if force ~= nil and force.valid and force.index ~= nil then
+		global.labsOfForce[force.index] = nil
+	else
+		-- If force is invalid/nil, we can't get its index and sth has gone very wrong, so just clear the whole cache to be safe.
+		global.labsOfForce = {}
+	end
 end
 
 ------------------------------------------------------------------------
@@ -150,11 +156,18 @@ end
 local function getLabSciencesAvailable(labs)
 	-- Returns a table mapping science pack names to true/false for whether enough labs have that pack.
 	-- Assumes there's at least 1 lab. Caller checks for case where there's no labs.
+	-- Returns nil if labs is invalid, in which case cache for force should be invalidated. Seems to happen sometimes in multiplayer with forces changing?
 	local numLabs = 0
 	local sciPackAmounts = {} -- maps name of science pack to number of labs that have it
 	for _, labList in pairs(labs) do
 		numLabs = numLabs + #labList
 		for _, lab in pairs(labList) do
+			---@cast lab LuaEntity
+			if lab == nil or (not lab.valid) then
+				-- Entire labs arg is invalid, so return nil to invalidate cache for force.
+				log("Error: Invalid lab in call to getLabSciencesAvailable, invalidating lab cache for force.")
+				return nil
+			end
 			local inventory = lab.get_output_inventory()
 			if inventory == nil then
 				log("Null inventory for lab, this shouldn't happen")
@@ -164,7 +177,7 @@ local function getLabSciencesAvailable(labs)
 			for i = 1, #inventory do
 				local item = inventory[i]
 				if item.valid_for_read then
-					sciPackName = item.name
+					local sciPackName = item.name
 					sciPackAmounts[sciPackName] = (sciPackAmounts[sciPackName] or 0) + 1
 				end
 			end
@@ -293,6 +306,7 @@ local function checkIfTechHasPrereqInQueue(queue, i)
 	return false
 end
 
+---@param force LuaForce
 local function updateResearchQueueForForce(force)
 	if not force.research_enabled then return end
 	if skipBecauseEarlyGame(force) then return end
@@ -314,14 +328,17 @@ local function updateResearchQueueForForce(force)
 	local sciencesAvailable = getLabSciencesAvailable(forceLabs)
 	force.print({"", "abc", profiler})
 	force.print("-- for getLabSciencesAvailable")
-	if sciencesAvailable == nil then return end
 	]]
 
 	local forceLabs = getLabsOfForce(force)
 	if #forceLabs == 0 then return end
 	local anyLab = forceLabs[1][1]
 	local sciencesAvailable = getLabSciencesAvailable(forceLabs)
-	if sciencesAvailable == nil then return end
+
+	if sciencesAvailable == nil then -- GetLabSciencesAvailable returned nil indicating invalid labs, so invalidate cache for force.
+		invalidateLabCache(force)
+		return nil
+	end
 
 	local annotatedQueue = {}
 	for i, tech in pairs(force.research_queue) do
@@ -380,7 +397,9 @@ for _, eventType in pairs({
 	script.on_event(eventType,
 		function(event)
 			---@cast event EventData.on_built_entity | EventData.on_player_mined_entity | EventData.on_robot_built_entity | EventData.on_robot_mined_entity | EventData.on_entity_died
-			invalidateLabCache(event.entity.force)
+			local force = event.entity.force
+			---@cast force LuaForce -- Guaranteed to be LuaForce when read.
+			invalidateLabCache(force)
 		end,
 		{{ filter = "type", type = "lab" }})
 end

@@ -12,6 +12,7 @@ local function SHOW_WARNINGS() return settings.global["AutoSwitchTechs-show-warn
 local function WARN_EVERY_N_TICKS() return 60 * settings.global["AutoSwitchTechs-warn-every-n-seconds"].value end
 local function SKIP_EARLY_GAME() return settings.global["AutoSwitchTechs-early-game-threshold"].value ~= "none" end
 local function EARLY_GAME_THRESHOLD() return settings.global["AutoSwitchTechs-early-game-threshold"].value end
+local function MOVE_TO_BACK() return settings.global["AutoSwitchTechs-move-to-back"].value end
 
 -- Constants to hold prototypes we fetch right at the start and then cache.
 local LABS = nil
@@ -248,10 +249,23 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 	if targetTechIndex == 1 then return end
 	local queue = force.research_queue
 	local newQueue = {queue[targetTechIndex]}
-	for i, tech in pairs(queue) do
-		if i ~= targetTechIndex then
-			table.insert(newQueue, tech)
+	if not MOVE_TO_BACK() then
+		for i, tech in pairs(queue) do
+			if i ~= targetTechIndex then
+				table.insert(newQueue, tech)
+			end
 		end
+	else -- Moving first to back, or to before first tech with a prereq.
+		local firstGoesToIndex = #queue -- Index we're moving the 1st tech in queue to, in newQueue.
+		for i, tech in pairs(queue) do
+			if i ~= 1 and i ~= targetTechIndex then
+				table.insert(newQueue, tech)
+				if annotatedQueue[i].hasPrereqInQueue then
+					firstGoesToIndex = #newQueue
+				end
+			end
+		end
+		table.insert(newQueue, firstGoesToIndex, queue[1])
 	end
 	force.research_queue = newQueue
 

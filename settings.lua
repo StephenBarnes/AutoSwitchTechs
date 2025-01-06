@@ -69,10 +69,17 @@ local settings = {
     },
     {
         order = getNextOrder(),
+        name = "AutoSwitchTechs-move-to-back",
+        type = "bool-setting",
+        setting_type = "runtime-global",
+        default_value = true,
+    },
+    {
+        order = getNextOrder(),
         name = "AutoSwitchTechs-science-available-threshold",
         type = "double-setting",
         setting_type = "runtime-global",
-        default_value = 0.5,
+        default_value = 0.8,
         min_value = 0,
         max_value = 1,
     },

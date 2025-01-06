@@ -3,6 +3,8 @@ Version: 1.4.0
 Date: 06. 01. 2025
   Features:
     - Added option to move techs to the back of the queue when they're switched away from, instead of moving them to second place.
+  Translation:
+    - Added AI-generated translations for Chinese, French, German, Japanese, Korean.
   Changes:
     - Increased default science-available threshold from 0.5 to 0.8, should reduce thrashing.
 ---------------------------------------------------------------------------------------------------

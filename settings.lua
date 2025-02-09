@@ -21,7 +21,7 @@ local settings = {
         type = "double-setting",
         setting_type = "startup",
         default_value = 10,
-        min_value = 0.1,
+        minimum_value = 0.1,
     },
     {
         order = getNextOrder(),
@@ -57,7 +57,7 @@ local settings = {
         type = "double-setting",
         setting_type = "runtime-global",
         default_value = 60,
-        min_value = 1,
+        minimum_value = 1,
     },
     {
         order = getNextOrder(),
@@ -80,8 +80,8 @@ local settings = {
         type = "double-setting",
         setting_type = "runtime-global",
         default_value = 0.8,
-        min_value = 0,
-        max_value = 1,
+        minimum_value = 0,
+        maximum_value = 1,
     },
 }
 

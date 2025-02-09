@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.4.1
+Date: 09. 02. 2025
+  Bugfixes:
+    - Fixed setting min/max values not working
+    - Fixed crash on load in latest experimental (2.0.34) due to signal item-subgroup changes.
+---------------------------------------------------------------------------------------------------
 Version: 1.4.0
 Date: 06. 01. 2025
   Features:

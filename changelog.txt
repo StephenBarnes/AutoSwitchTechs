@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.5.0
+Date: 22. 02. 2025
+  Features:
+    - TODO Add way to prioritize spoilable and late-game science packs together using method from Matrix_V.
+  Bugfixes:
+    - TODO Fixed bug where labs cache wouldn't get updated when labs are built by space platforms or other mods.
+---------------------------------------------------------------------------------------------------
 Version: 1.4.2
 Date: 09. 02. 2025
   Translation:

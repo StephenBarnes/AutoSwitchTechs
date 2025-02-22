@@ -404,15 +404,24 @@ script.on_nth_tick(RUN_EVERY_N_TICKS, updateResearchQueue)
 for _, eventType in pairs({
 	defines.events.on_built_entity,
 	defines.events.on_player_mined_entity,
+
 	defines.events.on_robot_built_entity,
 	defines.events.on_robot_mined_entity,
+
+	defines.events.on_space_platform_built_entity,
+	defines.events.on_space_platform_mined_entity,
+
+	defines.events.script_raised_built,
+	defines.events.script_raised_revive,
+
 	defines.events.on_entity_died,
+	defines.events.on_entity_cloned,
 }) do
 	script.on_event(eventType,
 		function(event)
-			---@cast event EventData.on_built_entity | EventData.on_player_mined_entity | EventData.on_robot_built_entity | EventData.on_robot_mined_entity | EventData.on_entity_died
+			---@cast event EventData.on_built_entity | EventData.on_player_mined_entity | EventData.on_robot_built_entity | EventData.on_robot_mined_entity | EventData.on_space_platform_built_entity | EventData.on_space_platform_mined_entity | EventData.script_raised_built | EventData.script_raised_revive | EventData.on_entity_died | EventData.on_entity_cloned
 			local force = event.entity.force
-			---@cast force LuaForce -- Guaranteed to be LuaForce when read.
+			---@cast force LuaForce -- Guaranteed to be LuaForce when read: lua-api.factorio.com/latest/classes/LuaControl.html#force
 			invalidateLabCache(force)
 		end,
 		{{ filter = "type", type = "lab" }})

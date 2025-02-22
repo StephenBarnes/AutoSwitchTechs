@@ -5,6 +5,7 @@ Date: 22. 02. 2025
     - When using settings to prioritize spoilable and late-game sciences together, techs that both have spoilable sciences will use late-game sciences as a tie-breaker, using method suggested by Matrix_V. Option to prioritize late-game sciences will now use tech's other sciences as tie-breakers.
   Bugfixes:
     - Fixed bug where labs cache didn't update when labs were built by space platforms or other mods.
+    - Changed global to storage. Might prevent multiplayer desyncs though no issues have been reported.
 ---------------------------------------------------------------------------------------------------
 Version: 1.4.2
 Date: 09. 02. 2025

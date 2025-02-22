@@ -66,20 +66,20 @@ end
 ---Functions to issue warnings to player when research queue is empty or has no available techs, etc.
 
 local function getLastWarnTime(force)
-	if not global then global = {} end
-	if global.lastWarnTimes == nil then
-		global.lastWarnTimes = {}
+	if not storage then storage = {} end
+	if storage.lastWarnTimes == nil then
+		storage.lastWarnTimes = {}
 		return nil
 	end
-	return global.lastWarnTimes[force.index]
+	return storage.lastWarnTimes[force.index]
 end
 
 local function updateLastWarnTime(force)
-	if not global then global = {} end
-	if global.lastWarnTimes == nil then
-		global.lastWarnTimes = {}
+	if not storage then storage = {} end
+	if storage.lastWarnTimes == nil then
+		storage.lastWarnTimes = {}
 	end
-	global.lastWarnTimes[force.index] = game.tick
+	storage.lastWarnTimes[force.index] = game.tick
 end
 
 local function alertForce(force, message, anyLab)
@@ -124,13 +124,13 @@ end
 
 local function getLabsOfForce(force)
 	-- Gets list-of-lists of labs, using cache. This is faster than findLabsOfForce.
-	if not global then global = {} end
-	if not global.labsOfForce then global.labsOfForce = {} end
-	if global.labsOfForce[force.index] then
-		return global.labsOfForce[force.index]
+	if not storage then storage = {} end
+	if not storage.labsOfForce then storage.labsOfForce = {} end
+	if storage.labsOfForce[force.index] then
+		return storage.labsOfForce[force.index]
 	else
 		local labs = findLabsOfForce(force)
-		global.labsOfForce[force.index] = labs
+		storage.labsOfForce[force.index] = labs
 		return labs
 	end
 end
@@ -144,13 +144,13 @@ end
 ---@param force LuaForce
 local function invalidateLabCache(force)
 	-- Clears cache of labs of the force. Called when a lab is built or destroyed.
-	if not global then global = {} end
-	if not global.labsOfForce then global.labsOfForce = {} end
+	if not storage then storage = {} end
+	if not storage.labsOfForce then storage.labsOfForce = {} end
 	if force ~= nil and force.valid and force.index ~= nil then
-		global.labsOfForce[force.index] = nil
+		storage.labsOfForce[force.index] = nil
 	else
 		-- If force is invalid/nil, we can't get its index and sth has gone very wrong, so just clear the whole cache to be safe.
-		global.labsOfForce = {}
+		storage.labsOfForce = {}
 	end
 end
 

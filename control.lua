@@ -32,21 +32,21 @@ end
 
 -- Table of priorities used for science packs when late-game priority is enabled. Priority of a tech is sum of priorities of its science packs, so it's determined first by the latest-game science pack and then by the other science packs in order.
 local lateGameness = {
-	["promethium-science-pack"] = 1e8,
-	["cryogenic-science-pack"] = 1e7,
-	["metallurgic-science-pack"] = 1e6,
-	["electromagnetic-science-pack"] = 1e6,
-	["agricultural-science-pack"] = 1e6,
-	["space-science-pack"] = 1e5,
-	["utility-science-pack"] = 1e4,
-	["production-science-pack"] = 1e4,
-	["chemical-science-pack"] = 1e3,
-	["military-science-pack"] = 1e2,
-	["logistic-science-pack"] = 1e1,
-	["automation-science-pack"] = 1e0,
+	["promethium-science-pack"] = 1e7,
+	["cryogenic-science-pack"] = 1e6,
+	["metallurgic-science-pack"] = 1e5,
+	["electromagnetic-science-pack"] = 1e5,
+	["agricultural-science-pack"] = 1e5,
+	["space-science-pack"] = 1e4,
+	["utility-science-pack"] = 1e3,
+	["production-science-pack"] = 1e3,
+	["chemical-science-pack"] = 1e2,
+	["military-science-pack"] = 1e1,
+	["logistic-science-pack"] = 1e0,
+	["automation-science-pack"] = 0,
 }
-local spoilablePriority = 1e9 -- If using setting to prioritize spoilable science, then they have higher priority than any other science pack.
-local lateGamenessDefault = 1e6 -- If no priority is set, it's probably a planetary science pack from a modded planet, so give it the same priority as the other planetary science packs.
+local spoilablePriority = 1e8 -- If using setting to prioritize spoilable science, then they have higher priority than any other science pack.
+local lateGamenessDefault = 1e5 -- If no priority is set, it's probably a planetary science pack from a modded planet, so give it the same priority as the other planetary science packs.
 
 local function getSciencePriority(sciPackName)
 	-- Returns a number for priority of the science pack. Higher numbers are higher priority.
@@ -59,7 +59,7 @@ local function getSciencePriority(sciPackName)
 	if PRIORITIZE_LATE_GAME_SCIENCE() then
 		return lateGameness[sciPackName] or lateGamenessDefault
 	end
-	return 1
+	return 0
 end
 
 ------------------------------------------------------------------------
@@ -203,6 +203,11 @@ local function techHasSciencesAvailable(tech, sciencesAvailable)
 end
 
 local function getTechPriority(tech)
+	-- Returns a number for priority of the tech, based on science packs.
+	if not PRIORITIZE_LATE_GAME_SCIENCE() and not PRIORITIZE_SPOILABLE_SCIENCE() then
+		return 0
+	end
+
 	local priority = 0
 	for _, sciPack in pairs(tech.research_unit_ingredients) do
 		priority = priority + getSciencePriority(sciPack.name)
@@ -293,10 +298,14 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 			switchReason = {"message.switched-bc-first-tech-missing-science", makeScienceIconString(missingSciences)}
 		else
 			local switchTargetPriority = annotatedQueue[targetTechIndex].priority
+			local originalPriority = annotatedQueue[1].priority
+			local switchPriorityDelta = switchTargetPriority - originalPriority
 			local prioritizedSciences = {}
 			for _, sciPack in pairs(annotatedQueue[targetTechIndex].tech.research_unit_ingredients) do
-				if getSciencePriority(sciPack.name) * 9 >= switchTargetPriority then
+				local sciPackPriority = getSciencePriority(sciPack.name)
+				if sciPackPriority * 9 >= switchPriorityDelta and sciPackPriority <= switchPriorityDelta then
 					-- The *9 is because we're adding up priorities that are powers of 10, so eg there could be two sciences with priority 1e6 resulting in total priority of 2e6 plus some remainder smaller than 1e6. Then we want to include all the 1e6 sciences as "reasons" for the switch.
+					-- Note that we subtract out the original priority from the switch target priority, so that we're only looking at the delta. This matters in some cases, eg when switching from tech with {spoilable science} to tech with {spoilable science, late-game science} -- in this case the highest-priority is the spoilable science, but the reason for the switch is the late-game science.
 					prioritizedSciences[sciPack.name] = true
 				end
 			end
@@ -364,7 +373,7 @@ local function updateResearchQueueForForce(force)
 		local available = techHasSciencesAvailable(tech, sciencesAvailable)
 		local priority
 		if hasPrereqInQueue or not available then
-			priority = 0
+			priority = -1
 		else
 			priority = getTechPriority(tech)
 		end
@@ -377,7 +386,7 @@ local function updateResearchQueueForForce(force)
 	end
 
 	-- Find tech with highest priority and switch to it.
-	local bestPriority = 0
+	local bestPriority = -1
 	local techIdxWithBestPriority = 0
 	for i, annotatedTech in pairs(annotatedQueue) do
 		if annotatedTech.priority > bestPriority then

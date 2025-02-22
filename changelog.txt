@@ -2,9 +2,9 @@
 Version: 1.5.0
 Date: 22. 02. 2025
   Features:
-    - TODO Add way to prioritize spoilable and late-game science packs together using method from Matrix_V.
+    - When using settings to prioritize spoilable and late-game sciences together, techs that both have spoilable sciences will use late-game sciences as a tie-breaker, using method suggested by Matrix_V. Option to prioritize late-game sciences will now use tech's other sciences as tie-breakers.
   Bugfixes:
-    - TODO Fixed bug where labs cache wouldn't get updated when labs are built by space platforms or other mods.
+    - Fixed bug where labs cache didn't update when labs were built by space platforms or other mods.
 ---------------------------------------------------------------------------------------------------
 Version: 1.4.2
 Date: 09. 02. 2025

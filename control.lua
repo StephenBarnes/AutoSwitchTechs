@@ -57,7 +57,7 @@ local function getSciencePriority(sciPackName)
 		end
 	end
 	if PRIORITIZE_LATE_GAME_SCIENCE() then
-		return lateGameness[sciPackName] or lateGamenessDefault
+		return lateGameness[sciPackName] or lateGamenessDefault -- In Lua, `0 or 100` is 0.
 	end
 	return 0
 end
@@ -303,7 +303,7 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 			local prioritizedSciences = {}
 			for _, sciPack in pairs(annotatedQueue[targetTechIndex].tech.research_unit_ingredients) do
 				local sciPackPriority = getSciencePriority(sciPack.name)
-				if sciPackPriority * 9 >= switchPriorityDelta and sciPackPriority <= switchPriorityDelta then
+				if sciPackPriority * 9 >= switchPriorityDelta and sciPackPriority <= switchPriorityDelta * 9 then
 					-- The *9 is because we're adding up priorities that are powers of 10, so eg there could be two sciences with priority 1e6 resulting in total priority of 2e6 plus some remainder smaller than 1e6. Then we want to include all the 1e6 sciences as "reasons" for the switch.
 					-- Note that we subtract out the original priority from the switch target priority, so that we're only looking at the delta. This matters in some cases, eg when switching from tech with {spoilable science} to tech with {spoilable science, late-game science} -- in this case the highest-priority is the spoilable science, but the reason for the switch is the late-game science.
 					prioritizedSciences[sciPack.name] = true

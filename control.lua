@@ -16,14 +16,20 @@ local function MOVE_TO_BACK() return settings.global["AutoSwitchTechs-move-to-ba
 
 -- Constants to hold prototypes we fetch right at the start and then cache.
 local LABS = nil
+---@type table<string, boolean>
 local SCIENCE_PACKS = nil
+---@type table<string, table<string, boolean>>
+local LAB_ALLOWS_SCIENCE_PACK = nil
 
 local function populateConstants()
 	LABS = prototypes.get_entity_filtered({{filter = "type", type = "lab"}})
 	SCIENCE_PACKS = {}
+	LAB_ALLOWS_SCIENCE_PACK = {}
 	for _, lab in pairs(LABS) do
+		LAB_ALLOWS_SCIENCE_PACK[lab.name] = {}
 		for _, sciPackName in pairs(lab.lab_inputs) do
 			SCIENCE_PACKS[sciPackName] = true
+			LAB_ALLOWS_SCIENCE_PACK[lab.name][sciPackName] = true
 		end
 	end
 end
@@ -32,8 +38,15 @@ end
 
 -- Table of priorities used for science packs when late-game priority is enabled. Priority of a tech is sum of priorities of its science packs, so it's determined first by the latest-game science pack and then by the other science packs in order.
 local lateGameness = {
-	["promethium-science-pack"] = 1e7,
-	["cryogenic-science-pack"] = 1e6,
+	["promethium-science-pack"] = 1e8,
+	["cryogenic-science-pack"] = 1e7,
+
+	["cerysian-science-pack"] = 1e6, -- For Cerys mod - Cerys is after Fulgora.
+	["electrochemical-science-pack"] = 1e6, -- For Corrundum - after Vulcanus.
+	["ring-science-pack"] = 1e6, -- For Metal and Stars - after nanite science.
+	["anomaly-science-pack"] = 1e6, -- For Metal and Stars - after nanite science.
+	["nanite-science-pack"] = 1e5, -- For Metal and Stars - after space science.
+
 	["metallurgic-science-pack"] = 1e5,
 	["electromagnetic-science-pack"] = 1e5,
 	["agricultural-science-pack"] = 1e5,
@@ -45,7 +58,7 @@ local lateGameness = {
 	["logistic-science-pack"] = 1e0,
 	["automation-science-pack"] = 0,
 }
-local spoilablePriority = 1e8 -- If using setting to prioritize spoilable science, then they have higher priority than any other science pack.
+local spoilablePriority = 1e9 -- If using setting to prioritize spoilable science, then they have higher priority than any other science pack.
 local lateGamenessDefault = 1e5 -- If no priority is set, it's probably a planetary science pack from a modded planet, so give it the same priority as the other planetary science packs.
 
 local function getSciencePriority(sciPackName)
@@ -156,14 +169,18 @@ end
 
 ------------------------------------------------------------------------
 
+---@return table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}> | nil
 local function getLabSciencesAvailable(labs)
 	-- Returns a table mapping science pack names to true/false for whether enough labs have that pack.
 	-- Assumes there's at least 1 lab. Caller checks for case where there's no labs.
 	-- Returns nil if labs is invalid, in which case cache for force should be invalidated. Seems to happen sometimes in multiplayer with forces changing?
-	local numLabs = 0
-	local sciPackAmounts = {} -- maps name of science pack to number of labs that have it
+	---@type table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}>
+	local sciPackAmounts = {} -- maps name of science pack to {number of labs that have it, number of labs that allow that science pack, whether enough labs have it}
+	for sciPackName, _ in pairs(SCIENCE_PACKS) do
+		sciPackAmounts[sciPackName] = {labsWithPack = 0, labsAllowingPack = 0, enough = false}
+	end
+
 	for _, labList in pairs(labs) do
-		numLabs = numLabs + #labList
 		for _, lab in pairs(labList) do
 			---@cast lab LuaEntity
 			if lab == nil or (not lab.valid) then
@@ -171,31 +188,41 @@ local function getLabSciencesAvailable(labs)
 				log("Error: Invalid lab in call to getLabSciencesAvailable, invalidating lab cache for force.")
 				return nil
 			end
+			if lab.frozen then goto continue end
 			local inventory = lab.get_output_inventory()
 			if inventory == nil then
 				log("Null inventory for lab, this shouldn't happen")
-				inventory = {}
-			end
-
-			for i = 1, #inventory do
-				local item = inventory[i]
-				if item.valid_for_read then
-					local sciPackName = item.name
-					sciPackAmounts[sciPackName] = (sciPackAmounts[sciPackName] or 0) + 1
+			else
+				for i = 1, #inventory do
+					local item = inventory[i]
+					if item.valid_for_read then
+						local sciPackName = item.name
+						sciPackAmounts[sciPackName].labsWithPack = sciPackAmounts[sciPackName].labsWithPack + 1
+					end
 				end
 			end
+			for sciPackName, _ in pairs(SCIENCE_PACKS) do
+				if LAB_ALLOWS_SCIENCE_PACK[lab.name][sciPackName] then
+					sciPackAmounts[sciPackName].labsAllowingPack = sciPackAmounts[sciPackName].labsAllowingPack + 1
+				end
+			end
+			::continue::
 		end
 	end
-	for sciPackName, count in pairs(sciPackAmounts) do
-		local fracAvailable = count / numLabs
-		sciPackAmounts[sciPackName] = (fracAvailable > SCIENCE_AVAILABLE_THRESHOLD())
+
+	for sciPackName, vals in pairs(sciPackAmounts) do
+		if vals.labsAllowingPack > 0 then
+			local fracAvailable = vals.labsWithPack / vals.labsAllowingPack
+			sciPackAmounts[sciPackName].enough = (fracAvailable > SCIENCE_AVAILABLE_THRESHOLD())
+		end
 	end
 	return sciPackAmounts
 end
 
+---@param sciencesAvailable table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}>
 local function techHasSciencesAvailable(tech, sciencesAvailable)
 	for _, sciPack in pairs(tech.research_unit_ingredients) do
-		if not sciencesAvailable[sciPack.name] then
+		if not sciencesAvailable[sciPack.name].enough then
 			return false
 		end
 	end
@@ -233,6 +260,7 @@ local function makeScienceIconString(sciences)
 	return r
 end
 
+---@param sciencesAvailable table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}>
 local function handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAvailable)
 	-- Handle situation where none of the techs in the queue have all their science packs available.
 	-- Look through the list of techs in the queue, and collect list of unavailable science packs that they need.
@@ -241,7 +269,7 @@ local function handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAva
 	for _, annotatedTech in pairs(annotatedQueue) do
 		if not annotatedTech.available and not annotatedTech.hasPrereqInQueue then
 			for _, sciPack in pairs(annotatedTech.tech.research_unit_ingredients) do
-				if not sciencesAvailable[sciPack.name] then
+				if not sciencesAvailable[sciPack.name].enough then
 					missingSciences[sciPack.name] = true
 				end
 			end
@@ -250,6 +278,7 @@ local function handleNoTechsAvailable(force, anyLab, annotatedQueue, sciencesAva
 	warnForce(force, {"message.no-techs-available", makeScienceIconString(missingSciences)}, anyLab)
 end
 
+---@param sciencesAvailable table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}>
 local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, sciencesAvailable)
 	-- Change research queue to put the specified tech at the start.
 	-- Can be called with index 1 to not switch techs.
@@ -291,7 +320,7 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 		if not annotatedQueue[1].available then
 			local missingSciences = {}
 			for _, sciPack in pairs(annotatedQueue[1].tech.research_unit_ingredients) do
-				if not sciencesAvailable[sciPack.name] then
+				if not sciencesAvailable[sciPack.name].enough then
 					missingSciences[sciPack.name] = true
 				end
 			end
@@ -403,7 +432,7 @@ local function updateResearchQueueForForce(force)
 end
 
 local function updateResearchQueue(nthTickEventData)
-	if LABS == nil or SCIENCE_PACKS == nil then
+	if LABS == nil or SCIENCE_PACKS == nil or LAB_ALLOWS_SCIENCE_PACK == nil then
 		populateConstants()
 	end
 	for _, force in pairs(game.forces) do

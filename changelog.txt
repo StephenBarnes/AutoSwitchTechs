@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.6.0
+Date: 21. 06. 2025
+  Compatibility:
+    - Added compatibility for modded labs that only allow some types of science packs.
+  Bugfixes:
+    - Fixed bug where missing science packs were reported as "(error)" when "prioritize late game science" is enabled and the mod switches away from techs that have early-game science packs not in the new tech.
+    - Ignore frozen labs (e.g. on Cerys) when checking science pack availability.
+---------------------------------------------------------------------------------------------------
 Version: 1.5.0
 Date: 22. 02. 2025
   Features:

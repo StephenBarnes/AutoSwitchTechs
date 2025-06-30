@@ -1,4 +1,9 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.6.1
+Date: 30. 06. 2025
+  Bugfixes:
+    - Fixed crash when lab spoilage goes to science pack inventory because spoilage inventory is full.
+---------------------------------------------------------------------------------------------------
 Version: 1.6.0
 Date: 21. 06. 2025
   Compatibility:

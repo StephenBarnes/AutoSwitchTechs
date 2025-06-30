@@ -171,7 +171,7 @@ end
 
 ---@return table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}> | nil
 local function getLabSciencesAvailable(labs)
-	-- Returns a table mapping science pack names to true/false for whether enough labs have that pack.
+	-- Returns a table mapping science pack names to how many labs have or allow that pack, and whether it's in enough labs to count as available.
 	-- Assumes there's at least 1 lab. Caller checks for case where there's no labs.
 	-- Returns nil if labs is invalid, in which case cache for force should be invalidated. Seems to happen sometimes in multiplayer with forces changing?
 	---@type table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}>
@@ -197,7 +197,9 @@ local function getLabSciencesAvailable(labs)
 					local item = inventory[i]
 					if item.valid_for_read then
 						local sciPackName = item.name
-						sciPackAmounts[sciPackName].labsWithPack = sciPackAmounts[sciPackName].labsWithPack + 1
+						if sciPackAmounts[sciPackName] ~= nil then -- Can be e.g. spoilage, instead of a science pack.
+							sciPackAmounts[sciPackName].labsWithPack = sciPackAmounts[sciPackName].labsWithPack + 1
+						end
 					end
 				end
 			end

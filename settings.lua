@@ -4,16 +4,6 @@ local function getNextOrder()
     return string.format("%03d", nextOrder)
 end
 
-local activationTriggers = { -- Possible techs where mod activates, or "none".
-    "none",
-    "logistic-science-pack",
-    "chemical-science-pack",
-    "space-science-pack",
-}
-if mods["space-age"] then
-    table.insert(activationTriggers, "agricultural-science-pack")
-end
-
 local settings = {
     {
         order = getNextOrder(),
@@ -58,14 +48,6 @@ local settings = {
         setting_type = "runtime-global",
         default_value = 60,
         minimum_value = 1,
-    },
-    {
-        order = getNextOrder(),
-        name = "AutoSwitchTechs-early-game-threshold",
-        type = "string-setting",
-        setting_type = "runtime-global",
-        default_value = "chemical-science-pack",
-        allowed_values = activationTriggers,
     },
     {
         order = getNextOrder(),

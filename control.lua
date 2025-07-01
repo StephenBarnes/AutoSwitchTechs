@@ -4,15 +4,14 @@ local scienceAlertIcon = { type = "virtual", name = "AutoSwitchTechs-science-ale
 local RUN_EVERY_N_TICKS = 60 * settings.startup["AutoSwitchTechs-run-every-n-seconds"].value
 
 -- Runtime settings - functions to fetch settings every time they're needed.
-local function PRIORITIZE_SPOILABLE_SCIENCE() return settings.global["AutoSwitchTechs-prioritize-spoilable-science"].value end
-local function PRIORITIZE_LATE_GAME_SCIENCE() return settings.global["AutoSwitchTechs-prioritize-late-game-science"].value end
-local function SCIENCE_AVAILABLE_THRESHOLD() return settings.global["AutoSwitchTechs-science-available-threshold"].value end
-local function NOTIFY_SWITCHES() return settings.global["AutoSwitchTechs-notify-switches"].value end
-local function SHOW_WARNINGS() return settings.global["AutoSwitchTechs-show-warnings"].value end
-local function WARN_EVERY_N_TICKS() return 60 * settings.global["AutoSwitchTechs-warn-every-n-seconds"].value end
-local function SKIP_EARLY_GAME() return settings.global["AutoSwitchTechs-early-game-threshold"].value ~= "none" end
-local function EARLY_GAME_THRESHOLD() return settings.global["AutoSwitchTechs-early-game-threshold"].value end
-local function MOVE_TO_BACK() return settings.global["AutoSwitchTechs-move-to-back"].value end
+local settingsGlobal = settings.global
+local function PRIORITIZE_SPOILABLE_SCIENCE() return settingsGlobal["AutoSwitchTechs-prioritize-spoilable-science"].value end
+local function PRIORITIZE_LATE_GAME_SCIENCE() return settingsGlobal["AutoSwitchTechs-prioritize-late-game-science"].value end
+local function SCIENCE_AVAILABLE_THRESHOLD() return settingsGlobal["AutoSwitchTechs-science-available-threshold"].value end
+local function NOTIFY_SWITCHES() return settingsGlobal["AutoSwitchTechs-notify-switches"].value end
+local function SHOW_WARNINGS() return settingsGlobal["AutoSwitchTechs-show-warnings"].value end
+local function WARN_EVERY_N_TICKS() return 60 * settingsGlobal["AutoSwitchTechs-warn-every-n-seconds"].value end
+local function MOVE_TO_BACK() return settingsGlobal["AutoSwitchTechs-move-to-back"].value end
 
 -- Constants to hold prototypes we fetch right at the start and then cache.
 local LABS = nil
@@ -74,6 +73,50 @@ local function getSciencePriority(sciPackName)
 	end
 	return 0
 end
+
+------------------------------------------------------------------------
+--- Handling the shortcut button to toggle mod on or off.
+local shortcutName = "toggle-auto-switch-techs"
+
+---@param force LuaForce
+local function getShortcutState(force)
+	if not storage then storage = {} end
+	if storage.shortcutState == nil then storage.shortcutState = {} end
+	local forceId = force.index
+	if storage.shortcutState[forceId] == nil then
+		storage.shortcutState[forceId] = false
+		return false
+	end
+	return storage.shortcutState[forceId]
+end
+
+---@param force LuaForce
+---@param newState boolean
+local function setShortcutState(force, newState)
+	if not storage then storage = {} end
+	if storage.shortcutState == nil then storage.shortcutState = {} end
+	local forceId = force.index
+	storage.shortcutState[forceId] = newState
+	for _, p in pairs(force.players) do
+		p.set_shortcut_toggled(shortcutName, newState)
+	end
+end
+
+-- Handler for when button is pressed.
+script.on_event(defines.events.on_lua_shortcut, function(event)
+	if event.prototype_name == shortcutName then
+		local player = game.get_player(event.player_index)
+		if player == nil then
+			log("ERROR: player who toggled shortcut could not be found")
+			return
+		end
+		local oldState = player.is_shortcut_toggled(shortcutName)
+		local newState = not oldState
+		local force = player.force
+		---@cast force LuaForce
+		setShortcutState(force, newState)
+	end
+end)
 
 ------------------------------------------------------------------------
 ---Functions to issue warnings to player when research queue is empty or has no available techs, etc.
@@ -348,12 +391,6 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 	end
 end
 
-local function skipBecauseEarlyGame(force)
-	-- Returns true if we should skip processing because this force is in early game, defined as not having green science or other tech.
-	if not SKIP_EARLY_GAME() then return false end
-	return (not force.technologies[EARLY_GAME_THRESHOLD()].researched)
-end
-
 local function checkIfTechHasPrereqInQueue(queue, i)
 	-- Check whether the tech at index i has a prerequisite earlier in the queue. In that case, we can't switch to it.
 	for j = 1, i-1 do
@@ -367,7 +404,7 @@ end
 ---@param force LuaForce
 local function updateResearchQueueForForce(force)
 	if not force.research_enabled then return end
-	if skipBecauseEarlyGame(force) then return end
+	if getShortcutState(force) == false then return end
 	local queue = force.research_queue
 	if #queue == 0 then
 		handleEmptyResearchQueue(force)

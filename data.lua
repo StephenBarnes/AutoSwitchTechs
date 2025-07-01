@@ -1,15 +1,9 @@
 -- Create virtual signal for the science warning icon.
 -- This is necessary because custom alerts can only use virtual signals for their icons.
-
-local subgroup
+local subgroup = nil
 if data.raw["item-subgroup"]["virtual-signal"] ~= nil then
 	subgroup = "virtual-signal"
-elseif data.raw["item-subgroup"]["additions"] ~= nil then
-	subgroup = "additions"
-else
-	subgroup = nil
 end
-
 data:extend({
 	{
 		type = "virtual-signal",
@@ -20,4 +14,17 @@ data:extend({
 		subgroup = subgroup, -- So it won't show up in "unsorted" tab of combinators.
 		order = "z",
 	},
+})
+
+-- Create toggle button
+data:extend({
+	{
+		type = "shortcut",
+		name = "toggle-auto-switch-techs",
+		icon = "__AutoSwitchTechs__/graphics/technology-black.png",
+		small_icon = "__AutoSwitchTechs__/graphics/technology-black.png",
+		toggleable = true,
+		action = "lua",
+		order = "z",
+	} ---@as data.ShortcutPrototype
 })

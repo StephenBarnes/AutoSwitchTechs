@@ -1,4 +1,9 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.7.0
+Date: TODO
+  Features:
+    - Added shortcut button to toggle tech switching on or off. Removed setting for "disable mod until X".
+---------------------------------------------------------------------------------------------------
 Version: 1.6.1
 Date: 30. 06. 2025
   Bugfixes:

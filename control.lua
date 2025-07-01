@@ -1,5 +1,3 @@
-local scienceAlertIcon = { type = "virtual", name = "AutoSwitchTechs-science-alert" }
-
 -- Startup settings
 local RUN_EVERY_N_TICKS = 60 * settings.startup["AutoSwitchTechs-run-every-n-seconds"].value
 
@@ -8,6 +6,7 @@ local settingsGlobal = settings.global
 local function PRIORITIZE_SPOILABLE_SCIENCE() return settingsGlobal["AutoSwitchTechs-prioritize-spoilable-science"].value end
 local function PRIORITIZE_LATE_GAME_SCIENCE() return settingsGlobal["AutoSwitchTechs-prioritize-late-game-science"].value end
 local function SCIENCE_AVAILABLE_THRESHOLD() return settingsGlobal["AutoSwitchTechs-science-available-threshold"].value end
+local function SCIENCE_COMMON_LOWER_THRESHOLD() return settingsGlobal["AutoSwitchTechs-common-science-lower-threshold"].value end
 local function NOTIFY_SWITCHES() return settingsGlobal["AutoSwitchTechs-notify-switches"].value end
 local function SHOW_WARNINGS() return settingsGlobal["AutoSwitchTechs-show-warnings"].value end
 local function WARN_EVERY_N_TICKS() return 60 * settingsGlobal["AutoSwitchTechs-warn-every-n-seconds"].value end
@@ -138,6 +137,7 @@ local function updateLastWarnTime(force)
 	storage.lastWarnTimes[force.index] = game.tick
 end
 
+local scienceAlertIcon = { type = "virtual", name = "AutoSwitchTechs-science-alert" }
 local function alertForce(force, message, anyLab)
 	-- Send an alert to every player on the force.
 	-- anyLab is any lab of the force, required by the game's alert system.
@@ -201,7 +201,7 @@ end
 
 ---@param force LuaForce
 local function fixInvalidatedSurfaces(force)
-	-- Checks cached lists of labs for the force, and fixes any that have been invalidated (because labs were created or destroyed) by finding labs on those invalidated surfaces.
+	-- Checks cached lists of labs for the force, and fixes any that have been invalidated (because labs were created or destroyed on that surface) by finding labs on those invalidated surfaces.
 	setUpStorage()
 	local forceIndex = force.index
 	storage.someSurfacesInvalidated[forceIndex] = false
@@ -280,8 +280,10 @@ end
 
 ------------------------------------------------------------------------
 
+---@param labs table<string, LuaEntity[]>
+---@param commonSciencePacks table<string, boolean>
 ---@return table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}> | nil
-local function getLabSciencesAvailable(labs)
+local function getLabSciencesAvailable(labs, commonSciencePacks)
 	-- Returns a table mapping science pack names to how many labs have or allow that pack, and whether it's in enough labs to count as available.
 	-- Assumes there's at least 1 lab. Caller checks for case where there's no labs.
 	-- Returns nil if labs is invalid, in which case cache for force should be invalidated. Seems to happen sometimes in multiplayer with forces changing?
@@ -292,6 +294,10 @@ local function getLabSciencesAvailable(labs)
 	end
 
 	for _, labList in pairs(labs) do
+		if labList == false then
+			log("ERROR: invalidated surface was not fixed")
+			labList = {}
+		end
 		for _, lab in pairs(labList) do
 			---@cast lab LuaEntity
 			if lab == nil or (not lab.valid) then
@@ -329,7 +335,11 @@ local function getLabSciencesAvailable(labs)
 	for sciPackName, vals in pairs(sciPackAmounts) do
 		if vals.labsAllowingPack > 0 then
 			local fracAvailable = vals.labsWithPack / vals.labsAllowingPack
-			sciPackAmounts[sciPackName].enough = (fracAvailable > SCIENCE_AVAILABLE_THRESHOLD())
+			if commonSciencePacks[sciPackName] then
+				sciPackAmounts[sciPackName].enough = (fracAvailable > SCIENCE_COMMON_LOWER_THRESHOLD())
+			else
+				sciPackAmounts[sciPackName].enough = (fracAvailable > SCIENCE_AVAILABLE_THRESHOLD())
+			end
 		end
 	end
 	return sciPackAmounts
@@ -472,6 +482,28 @@ local function checkIfTechHasPrereqInQueue(queue, i)
 	return false
 end
 
+--- Function to return a set mapping science packs to true if all techs in the force's research queue require that science pack. This is used to decide whether to use the lower availability threshold for that science.
+---@param force LuaForce
+---@return table<string, boolean>
+local function getCommonSciencePacks(force)
+	local common = {}
+	for _, tech in pairs(force.research_queue) do
+		for _, sciPack in pairs(tech.research_unit_ingredients) do
+			local sciPackName = sciPack.name
+			if common[sciPackName] == nil then
+				common[sciPackName] = 1
+			else
+				common[sciPackName] = common[sciPackName] + 1
+			end
+		end
+	end
+	local researchQueueSize = #(force.research_queue)
+	for sciPackName, count in pairs(common) do
+		common[sciPackName] = (count == researchQueueSize)
+	end
+	return common
+end
+
 ---@param force LuaForce
 local function updateResearchQueueForForce(force)
 	if not force.research_enabled then return end
@@ -499,7 +531,8 @@ local function updateResearchQueueForForce(force)
 	local forceLabs = getLabsOfForce(force)
 	if table_size(forceLabs) == 0 then return end
 	local anyLab = getAnyLabOfForce(force)
-	local sciencesAvailable = getLabSciencesAvailable(forceLabs)
+	local commonSciencePacks = getCommonSciencePacks(force)
+	local sciencesAvailable = getLabSciencesAvailable(forceLabs, commonSciencePacks)
 
 	if sciencesAvailable == nil then -- GetLabSciencesAvailable returned nil indicating invalid labs, so invalidate cache for force.
 		invalidateLabCache(force)

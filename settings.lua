@@ -65,6 +65,15 @@ local settings = {
         minimum_value = 0,
         maximum_value = 1,
     },
+    {
+        order = getNextOrder(),
+        name = "AutoSwitchTechs-common-science-lower-threshold",
+        type = "double-setting",
+        setting_type = "runtime-global",
+        default_value = 0.1,
+        minimum_value = 0,
+        maximum_value = 1,
+    },
 }
 
 data:extend(settings)

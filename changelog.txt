@@ -1,8 +1,9 @@
 ---------------------------------------------------------------------------------------------------
 Version: 1.7.0
-Date: TODO
+Date: 2025-07-01
   Features:
     - Added shortcut button to toggle tech switching on or off. Removed setting for "disable mod until X".
+    - Added lower threshold for science packs shared by all techs in queue, so that tech-switching still works if a lower-tier science pack is the bottleneck.
   Optimizations:
     - Cache list of labs per-surface; when lab is created/destroyed, only invalidate and rebuild cache for that surface instead of searching all surfaces.
 ---------------------------------------------------------------------------------------------------

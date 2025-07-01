@@ -35,6 +35,7 @@ end
 ------------------------------------------------------------------------
 
 -- Table of priorities used for science packs when late-game priority is enabled. Priority of a tech is sum of priorities of its science packs, so it's determined first by the latest-game science pack and then by the other science packs in order.
+-- TODO I don't like this system. It basically uses decimal numbers to do a kind of digit-wise comparison - like bitwise comparison, except base-10 because we can have multiple science packs with the same priority. Will behave weirdly if you have 10+ science packs at the same priority level. Would be better to just explicitly keep track of all science packs and do the comparisons in a loop.
 local lateGameness = {
 	["promethium-science-pack"] = 1e8,
 	["cryogenic-science-pack"] = 1e7,
@@ -124,7 +125,31 @@ script.on_event(defines.events.on_lua_shortcut, function(event)
 	end
 end)
 
-------------------------------------------------------------------------
+for _, eventType in pairs{
+	defines.events.on_player_changed_force,
+	defines.events.on_player_joined_game,
+	defines.events.on_player_created,
+} do
+	script.on_event(eventType, function(e)
+		---@cast e EventData.on_player_changed_force | EventData.on_player_joined_game | EventData.on_player_created
+		if e.player_index == nil then
+			log("ERROR: player has nil index")
+			return
+		end
+		local player = game.get_player(e.player_index)
+		if player == nil or not player.valid then
+			log("ERROR: player is nil or invalid")
+			return
+		end
+		local force = player.force
+		---@cast force LuaForce
+		if force and force.valid then
+			player.set_shortcut_toggled(shortcutName, getShortcutState(force))
+		end
+	end)
+end
+
+-----------------------------------------------------------------------
 ---Functions to issue warnings to player when research queue is empty or has no available techs, etc.
 
 local function getLastWarnTime(force)
@@ -175,7 +200,7 @@ local function findLabsOfForce(force)
 	for _, surface in pairs(game.surfaces) do
 		local surfaceLabs = surface.find_entities_filtered({type="lab", force=force})
 		if #surfaceLabs ~= 0 then
-			labs[surface.name] = labs
+			labs[surface.name] = surfaceLabs
 		end
 	end
 	return labs
@@ -260,7 +285,8 @@ local function invalidateLabCache(force, surfaceName)
 	-- Clears cache of labs of the force, on one surface or all of them. Called when a lab is built or destroyed.
 	setUpStorage()
 	if force == nil or not force.valid then
-		--If force is invalid/nil, we can't get its index and sth has gone very wrong, so just clear the whole cache to be safe.
+		--If force is invalid/nil, we can't get its index and something has gone very wrong, so just clear the whole cache to be safe.
+		log("ERROR: Force is invalid or nil. Invalidating all lab caches.")
 		storage.forceSurfaceLabs = {}
 		return
 	end
@@ -288,34 +314,34 @@ local function getLabSciencesAvailable(labs, commonSciencePacks)
 	-- Assumes there's at least 1 lab. Caller checks for case where there's no labs.
 	-- Returns nil if labs is invalid, in which case cache for force should be invalidated. Seems to happen sometimes in multiplayer with forces changing?
 	---@type table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}>
-	local sciPackAmounts = {} -- maps name of science pack to {number of labs that have it, number of labs that allow that science pack, whether enough labs have it}
+	local sciPackAvailability = {} -- maps name of science pack to {number of labs that have it, number of labs that allow that science pack, whether enough labs have it}
 	for sciPackName, _ in pairs(SCIENCE_PACKS) do
-		sciPackAmounts[sciPackName] = {labsWithPack = 0, labsAllowingPack = 0, enough = false}
+		sciPackAvailability[sciPackName] = {labsWithPack = 0, labsAllowingPack = 0, enough = false}
 	end
 
 	for _, labList in pairs(labs) do
 		if labList == false then
-			log("ERROR: invalidated surface was not fixed")
+			log("ERROR: Invalidated surface cache was not fixed, this should not happen.")
 			labList = {}
 		end
-		for _, lab in pairs(labList) do
+		for surfaceName, lab in pairs(labList) do
 			---@cast lab LuaEntity
 			if lab == nil or (not lab.valid) then
 				-- Entire labs arg is invalid, so return nil to invalidate cache for force.
-				log("Error: Invalid lab in call to getLabSciencesAvailable, invalidating lab cache for force.")
+				log("ERROR: Invalid lab in call to getLabSciencesAvailable, invalidating lab cache for force.")
 				return nil
 			end
 			if lab.frozen then goto continue end
 			local inventory = lab.get_output_inventory()
 			if inventory == nil then
-				log("Null inventory for lab, this shouldn't happen")
+				log("ERROR: Null inventory for lab, this shouldn't happen.")
 			else
 				for i = 1, #inventory do
 					local item = inventory[i]
 					if item.valid_for_read then
 						local sciPackName = item.name
-						local thisSciPackAmounts = sciPackAmounts[sciPackName]
-						-- Can be e.g. spoilage, instead of a science pack.
+						local thisSciPackAmounts = sciPackAvailability[sciPackName]
+						-- Can be e.g. spoilage, instad of a science pack.
 						if thisSciPackAmounts ~= nil then
 							thisSciPackAmounts.labsWithPack = thisSciPackAmounts.labsWithPack + 1
 						end
@@ -324,7 +350,7 @@ local function getLabSciencesAvailable(labs, commonSciencePacks)
 			end
 			for sciPackName, _ in pairs(SCIENCE_PACKS) do
 				if LAB_ALLOWS_SCIENCE_PACK[lab.name][sciPackName] then
-					local thisSciPackAmounts = sciPackAmounts[sciPackName]
+					local thisSciPackAmounts = sciPackAvailability[sciPackName]
 					thisSciPackAmounts.labsAllowingPack = thisSciPackAmounts.labsAllowingPack + 1
 				end
 			end
@@ -332,17 +358,19 @@ local function getLabSciencesAvailable(labs, commonSciencePacks)
 		end
 	end
 
-	for sciPackName, vals in pairs(sciPackAmounts) do
+	for sciPackName, vals in pairs(sciPackAvailability) do
 		if vals.labsAllowingPack > 0 then
 			local fracAvailable = vals.labsWithPack / vals.labsAllowingPack
+			local threshold
 			if commonSciencePacks[sciPackName] then
-				sciPackAmounts[sciPackName].enough = (fracAvailable > SCIENCE_COMMON_LOWER_THRESHOLD())
+				threshold = SCIENCE_COMMON_LOWER_THRESHOLD()
 			else
-				sciPackAmounts[sciPackName].enough = (fracAvailable > SCIENCE_AVAILABLE_THRESHOLD())
+				threshold = SCIENCE_AVAILABLE_THRESHOLD()
 			end
+			sciPackAvailability[sciPackName].enough = (fracAvailable > threshold)
 		end
 	end
-	return sciPackAmounts
+	return sciPackAvailability
 end
 
 ---@param sciencesAvailable table<string, {labsWithPack: number, labsAllowingPack: number, enough: boolean}>
@@ -486,6 +514,9 @@ end
 ---@param force LuaForce
 ---@return table<string, boolean>
 local function getCommonSciencePacks(force)
+	if #(force.research_queue) <= 1 then
+		return {} -- If there's only 1 in the queue, we're not switching anyway, so count nothing as common, so everything uses the higher threshold and gets correctly reported as missing.
+	end
 	local common = {}
 	for _, tech in pairs(force.research_queue) do
 		for _, sciPack in pairs(tech.research_unit_ingredients) do
@@ -616,3 +647,10 @@ for _, eventType in pairs({
 		end,
 		{{ filter = "type", type = "lab" }})
 end
+
+-- On configuration changed, invalidate all forces' caches, so we build the lists.
+script.on_configuration_changed(function()
+	for _, force in pairs(game.forces) do
+		invalidateLabCache(force)
+	end
+end)

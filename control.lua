@@ -75,13 +75,22 @@ local function getSciencePriority(sciPackName)
 end
 
 ------------------------------------------------------------------------
+
+local function setUpStorage()
+	if not storage then storage = {} end
+	if storage.shortcutState == nil then storage.shortcutState = {} end
+	if storage.lastWarnTimes == nil then storage.lastWarnTimes = {} end
+	if storage.forceSurfaceLabs == nil then storage.forceSurfaceLabs = {} end
+	if storage.someSurfacesInvalidated == nil then storage.someSurfacesInvalidated = {} end
+end
+
+------------------------------------------------------------------------
 --- Handling the shortcut button to toggle mod on or off.
 local shortcutName = "toggle-auto-switch-techs"
 
 ---@param force LuaForce
 local function getShortcutState(force)
-	if not storage then storage = {} end
-	if storage.shortcutState == nil then storage.shortcutState = {} end
+	setUpStorage()
 	local forceId = force.index
 	if storage.shortcutState[forceId] == nil then
 		storage.shortcutState[forceId] = false
@@ -93,10 +102,8 @@ end
 ---@param force LuaForce
 ---@param newState boolean
 local function setShortcutState(force, newState)
-	if not storage then storage = {} end
-	if storage.shortcutState == nil then storage.shortcutState = {} end
-	local forceId = force.index
-	storage.shortcutState[forceId] = newState
+	setUpStorage()
+	storage.shortcutState[force.index] = newState
 	for _, p in pairs(force.players) do
 		p.set_shortcut_toggled(shortcutName, newState)
 	end
@@ -122,19 +129,12 @@ end)
 ---Functions to issue warnings to player when research queue is empty or has no available techs, etc.
 
 local function getLastWarnTime(force)
-	if not storage then storage = {} end
-	if storage.lastWarnTimes == nil then
-		storage.lastWarnTimes = {}
-		return nil
-	end
+	setUpStorage()
 	return storage.lastWarnTimes[force.index]
 end
 
 local function updateLastWarnTime(force)
-	if not storage then storage = {} end
-	if storage.lastWarnTimes == nil then
-		storage.lastWarnTimes = {}
-	end
+	setUpStorage()
 	storage.lastWarnTimes[force.index] = game.tick
 end
 
@@ -164,49 +164,117 @@ end
 
 ------------------------------------------------------------------------
 
+---@param force LuaForce
+---@return table<string, LuaEntity[]>
 local function findLabsOfForce(force)
 	-- Looks at all surfaces and finds all labs of the force.
 	-- This is expensive! Can easily take like 70ms on a good computer, which is multiple frames. So prefer to use getLabsOfForce below, which uses a cache.
-	-- Returns list of lists of labs, because I'm guessing that's faster than inserting them one-by-one into one list.
+	-- Returns table mapping surface name to list of labs.
+	---@type table<string, LuaEntity[]>
 	local labs = {}
 	for _, surface in pairs(game.surfaces) do
 		local surfaceLabs = surface.find_entities_filtered({type="lab", force=force})
 		if #surfaceLabs ~= 0 then
-			table.insert(labs, surfaceLabs)
+			labs[surface.name] = labs
 		end
 	end
 	return labs
 end
 
+---@param force LuaForce
+---@param surfaceName string
+---@return LuaEntity[]?
+local function findLabsOfForceOnSurface(force, surfaceName)
+	-- Returns list of all labs on the given surface, or nil if none found.
+	-- This is somewhat expensive. Prefer using getLabsOfForce below.
+	local surface = game.get_surface(surfaceName)
+	if surface == nil or not surface.valid then
+		log("ERROR: tried to find labs on invalid/nil surface: " .. serpent.line(surfaceName))
+		return {}
+	end
+	local surfaceLabs = surface.find_entities_filtered({type="lab", force=force})
+	if #surfaceLabs ~= 0 then
+		return surfaceLabs
+	end
+	return nil
+end
+
+---@param force LuaForce
+local function fixInvalidatedSurfaces(force)
+	-- Checks cached lists of labs for the force, and fixes any that have been invalidated (because labs were created or destroyed) by finding labs on those invalidated surfaces.
+	setUpStorage()
+	local forceIndex = force.index
+	storage.someSurfacesInvalidated[forceIndex] = false
+
+	if storage.forceSurfaceLabs[forceIndex] == nil then
+		storage.forceSurfaceLabs[forceIndex] = findLabsOfForce(force)
+		return
+	end
+
+	for surfaceName, labs in pairs(storage.forceSurfaceLabs[forceIndex]) do
+		if labs == false then -- ie, if this surface was invalidated
+			storage.forceSurfaceLabs[forceIndex][surfaceName] = findLabsOfForceOnSurface(force, surfaceName)
+		end
+	end
+end
+
 local function getLabsOfForce(force)
-	-- Gets list-of-lists of labs, using cache. This is faster than findLabsOfForce.
-	if not storage then storage = {} end
-	if not storage.labsOfForce then storage.labsOfForce = {} end
-	if storage.labsOfForce[force.index] then
-		return storage.labsOfForce[force.index]
+	-- Gets table of surface name to labs, using cache. This is faster than findLabsOfForce.
+	setUpStorage()
+	local forceIndex = force.index
+
+	if storage.someSurfacesInvalidated[forceIndex] then
+		fixInvalidatedSurfaces(force)
+		return storage.forceSurfaceLabs[forceIndex]
+	end
+
+	if storage.forceSurfaceLabs[forceIndex] then
+		return storage.forceSurfaceLabs[forceIndex]
 	else
 		local labs = findLabsOfForce(force)
-		storage.labsOfForce[force.index] = labs
+		storage.forceSurfaceLabs[forceIndex] = labs
+		storage.someSurfacesInvalidated[forceIndex] = false
 		return labs
 	end
 end
 
 local function getAnyLabOfForce(force)
 	-- Returns any lab of the force, or nil if the force has no labs. Uses cache.
-	local labsOfForce = getLabsOfForce(force)
-	if #labsOfForce ~= 0 then return labsOfForce[1][1] end
+	local forceSurfaceLabs = getLabsOfForce(force)
+	if table_size(forceSurfaceLabs) ~= 0 then
+		-- Try returning first one on Nauvis, if it exists.
+		local nauvisLabs = forceSurfaceLabs.nauvis
+		if nauvisLabs ~= nil and nauvisLabs ~= false and #nauvisLabs > 0 then
+			return nauvisLabs[1]
+		end
+		-- Else, return first lab found.
+		for _, labs in pairs(forceSurfaceLabs) do
+			if labs ~= false and #labs > 0 then return labs[1] end
+		end
+	end
 end
 
 ---@param force LuaForce
-local function invalidateLabCache(force)
-	-- Clears cache of labs of the force. Called when a lab is built or destroyed.
-	if not storage then storage = {} end
-	if not storage.labsOfForce then storage.labsOfForce = {} end
-	if force ~= nil and force.valid and force.index ~= nil then
-		storage.labsOfForce[force.index] = nil
+---@param surfaceName string|nil
+local function invalidateLabCache(force, surfaceName)
+	-- Clears cache of labs of the force, on one surface or all of them. Called when a lab is built or destroyed.
+	setUpStorage()
+	if force == nil or not force.valid then
+		--If force is invalid/nil, we can't get its index and sth has gone very wrong, so just clear the whole cache to be safe.
+		storage.forceSurfaceLabs = {}
+		return
+	end
+
+	local forceIndex = force.index
+	if surfaceName == nil then
+		storage.forceSurfaceLabs[forceIndex] = nil
+		storage.someSurfacesInvalidated[forceIndex] = true
 	else
-		-- If force is invalid/nil, we can't get its index and sth has gone very wrong, so just clear the whole cache to be safe.
-		storage.labsOfForce = {}
+		if storage.forceSurfaceLabs[forceIndex] == nil then
+			storage.forceSurfaceLabs[forceIndex] = {}
+		end
+		storage.forceSurfaceLabs[forceIndex][surfaceName] = false
+		storage.someSurfacesInvalidated[forceIndex] = true
 	end
 end
 
@@ -240,15 +308,18 @@ local function getLabSciencesAvailable(labs)
 					local item = inventory[i]
 					if item.valid_for_read then
 						local sciPackName = item.name
-						if sciPackAmounts[sciPackName] ~= nil then -- Can be e.g. spoilage, instead of a science pack.
-							sciPackAmounts[sciPackName].labsWithPack = sciPackAmounts[sciPackName].labsWithPack + 1
+						local thisSciPackAmounts = sciPackAmounts[sciPackName]
+						-- Can be e.g. spoilage, instead of a science pack.
+						if thisSciPackAmounts ~= nil then
+							thisSciPackAmounts.labsWithPack = thisSciPackAmounts.labsWithPack + 1
 						end
 					end
 				end
 			end
 			for sciPackName, _ in pairs(SCIENCE_PACKS) do
 				if LAB_ALLOWS_SCIENCE_PACK[lab.name][sciPackName] then
-					sciPackAmounts[sciPackName].labsAllowingPack = sciPackAmounts[sciPackName].labsAllowingPack + 1
+					local thisSciPackAmounts = sciPackAmounts[sciPackName]
+					thisSciPackAmounts.labsAllowingPack = thisSciPackAmounts.labsAllowingPack + 1
 				end
 			end
 			::continue::
@@ -417,7 +488,7 @@ local function updateResearchQueueForForce(force)
 	local forceLabs = getLabsOfForce(force)
 	force.print(profiler)
 	force.print("-- for findLabsOfForce")
-	if #forceLabs == 0 then return end
+	if table_size(forceLabs) == 0 then return end
 	local anyLab = forceLabs[1][1]
 	profiler:reset()
 	local sciencesAvailable = getLabSciencesAvailable(forceLabs)
@@ -426,8 +497,8 @@ local function updateResearchQueueForForce(force)
 	]]
 
 	local forceLabs = getLabsOfForce(force)
-	if #forceLabs == 0 then return end
-	local anyLab = forceLabs[1][1]
+	if table_size(forceLabs) == 0 then return end
+	local anyLab = getAnyLabOfForce(force)
 	local sciencesAvailable = getLabSciencesAvailable(forceLabs)
 
 	if sciencesAvailable == nil then -- GetLabSciencesAvailable returned nil indicating invalid labs, so invalidate cache for force.
@@ -478,10 +549,9 @@ local function updateResearchQueue(nthTickEventData)
 		updateResearchQueueForForce(force)
 	end
 end
-
 script.on_nth_tick(RUN_EVERY_N_TICKS, updateResearchQueue)
 
--- When a lab is built or destroyed, invalidate the cache of labs of the force. So next time they're needed, we'll re-find them using findLabsOfForce.
+-- When a lab is built or destroyed, invalidate the cache of labs of the force for that surface. So next time they're needed, we'll re-find them using findLabsOfForceOnSurface.
 for _, eventType in pairs({
 	defines.events.on_built_entity,
 	defines.events.on_player_mined_entity,
@@ -503,7 +573,13 @@ for _, eventType in pairs({
 			---@cast event EventData.on_built_entity | EventData.on_player_mined_entity | EventData.on_robot_built_entity | EventData.on_robot_mined_entity | EventData.on_space_platform_built_entity | EventData.on_space_platform_mined_entity | EventData.script_raised_built | EventData.script_raised_revive | EventData.on_entity_died | EventData.on_entity_cloned
 			local force = event.entity.force
 			---@cast force LuaForce -- Guaranteed to be LuaForce when read: lua-api.factorio.com/latest/classes/LuaControl.html#force
-			invalidateLabCache(force)
+			---@type LuaEntity?
+			local entity = event.entity
+			local surfaceName = nil
+			if entity ~= nil and entity.valid then
+				surfaceName = entity.surface.name
+			end
+			invalidateLabCache(force, surfaceName)
 		end,
 		{{ filter = "type", type = "lab" }})
 end

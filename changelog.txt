@@ -3,6 +3,8 @@ Version: 1.7.0
 Date: TODO
   Features:
     - Added shortcut button to toggle tech switching on or off. Removed setting for "disable mod until X".
+  Optimizations:
+    - Cache list of labs per-surface; when lab is created/destroyed, only invalidate and rebuild cache for that surface instead of searching all surfaces.
 ---------------------------------------------------------------------------------------------------
 Version: 1.6.1
 Date: 30. 06. 2025

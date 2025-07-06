@@ -20,9 +20,6 @@ end
 -- Startup settings
 local RUN_EVERY_N_TICKS = 60 * settings.startup["AutoSwitchTechs-run-every-n-seconds"].value
 
--- Runtime settings - refetched at game start or when they're changed, since they can be changed during teh game.
-settingPrioritizeSpoilableScience, settingPrioritizeLateGameScience, settingScienceAvailableThreshold, settingCommonScienceLowerThreshold, settingNotifySwitches, settingShowWarnings, settingWarnEveryNTicks, settingMoveToBack, settingSciencePackPriorities = nil, nil, nil, nil, nil, nil, nil, nil, nil
-
 -- Table of priorities used for science packs when late-game priority is enabled. Priority of a tech is sum of priorities of its science packs, so it's determined first by the latest-game science pack and then by the other science packs in order.
 -- TODO I don't like this system. It basically uses decimal numbers to do a kind of digit-wise comparison - like bitwise comparison, except base-10 because we can have multiple science packs with the same priority. Will behave weirdly if you have 10+ science packs at the same priority level. Would be better to just explicitly keep track of all science packs and do the comparisons in a loop.
 local lateGameness = {
@@ -59,18 +56,21 @@ local lateGamenessDefault = 1e5 -- If no priority is set, it's probably a planet
 local function getSciencePriority(sciPackName)
 	-- Returns a number for priority of the science pack. Higher numbers are higher priority.
 	-- Note this can change in the middle of a game, since we use runtime-global settings for priorities.
-	local setPriority = settings.global["AutoSwitchTechs-override-priority-" .. sciPackName].value
-	if setPriority ~= -1 then
-		if setPriority == 0 then return 0 end
-		return 10 ^ (setPriority - 1)
+	local setting = settings.global["AutoSwitchTechs-override-priority-" .. sciPackName]
+	if setting ~= nil then
+		local setPriority = setting.value
+		if setPriority ~= -1 then
+			if setPriority == 0 then return 0 end
+			return 10 ^ (setPriority - 1)
+		end
 	end
 	-- If it's not overridden, determine priority based on settings to prioritize spoilable or late-game science.
-	if settingPrioritizeSpoilableScience then
+	if storage.settings.prioritizeSpoilableScience then
 		if prototypes.item[sciPackName].get_spoil_ticks() ~= 0 then
 			return spoilablePriority
 		end
 	end
-	if settingPrioritizeLateGameScience then
+	if storage.settings.prioritizeLateGameScience then
 		return lateGameness[sciPackName] or lateGamenessDefault -- In Lua, `0 or 100` is 0.
 	end
 	return 0
@@ -78,26 +78,20 @@ end
 
 local function refetchSettings()
 	local settingsGlobal = settings.global
-	settingPrioritizeSpoilableScience = settingsGlobal["AutoSwitchTechs-prioritize-spoilable-science"].value
-	settingPrioritizeLateGameScience = settingsGlobal["AutoSwitchTechs-prioritize-late-game-science"].value
-	settingScienceAvailableThreshold = settingsGlobal["AutoSwitchTechs-science-available-threshold"].value
-	settingCommonScienceLowerThreshold = settingsGlobal["AutoSwitchTechs-common-science-lower-threshold"].value
-	settingNotifySwitches = settingsGlobal["AutoSwitchTechs-notify-switches"].value
-	settingShowWarnings = settingsGlobal["AutoSwitchTechs-show-warnings"].value
-	settingWarnEveryNTicks = 60 * settingsGlobal["AutoSwitchTechs-warn-every-n-seconds"].value
-	settingMoveToBack = settingsGlobal["AutoSwitchTechs-move-to-back"].value
-	settingSciencePackPriorities = {}
-	for modName, sciencePacks in pairs(modToSciences) do
-		if script.active_mods[modName] then
-			for _, sciencePack in pairs(sciencePacks) do
-				settingSciencePackPriorities[sciencePack] = getSciencePriority(sciencePack)
-			end
-		end
+	if storage.settings == nil then storage.settings = {} end
+	storage.settings.prioritizeSpoilableScience = settingsGlobal["AutoSwitchTechs-prioritize-spoilable-science"].value
+	storage.settings.prioritizeLateGameScience = settingsGlobal["AutoSwitchTechs-prioritize-late-game-science"].value
+	storage.settings.scienceAvailableThreshold = settingsGlobal["AutoSwitchTechs-science-available-threshold"].value
+	storage.settings.commonScienceLowerThreshold = settingsGlobal["AutoSwitchTechs-common-science-lower-threshold"].value
+	storage.settings.notifySwitches = settingsGlobal["AutoSwitchTechs-notify-switches"].value
+	storage.settings.showWarnings = settingsGlobal["AutoSwitchTechs-show-warnings"].value
+	storage.settings.warnEveryNTicks = 60 * settingsGlobal["AutoSwitchTechs-warn-every-n-seconds"].value
+	storage.settings.moveToBack = settingsGlobal["AutoSwitchTechs-move-to-back"].value
+	storage.settings.sciencePackPriorities = {}
+	for sciPackName, _ in pairs(SCIENCE_PACKS) do
+		storage.settings.sciencePackPriorities[sciPackName] = getSciencePriority(sciPackName)
 	end
 end
-
-------------------------------------------------------------------------
-
 
 ------------------------------------------------------------------------
 --- Handling the shortcut button to toggle mod on or off.
@@ -187,9 +181,9 @@ end
 local function canWarnNow(force)
 	-- Returns true if we can issue a warning to the force now, else false.
 	-- There's a setting to not warn more than once every N seconds.
-	if not settingShowWarnings then return false end
+	if not storage.settings.showWarnings then return false end
 	local lastWarnTime = getLastWarnTime(force)
-	return (lastWarnTime == nil) or (lastWarnTime + settingWarnEveryNTicks < game.tick)
+	return (lastWarnTime == nil) or (lastWarnTime + storage.settings.warnEveryNTicks < game.tick)
 end
 
 local function warnForce(force, warning, anyLab)
@@ -377,9 +371,9 @@ local function getLabSciencesAvailable(labs, commonSciencePacks)
 			local fracAvailable = vals.labsWithPack / vals.labsAllowingPack
 			local threshold
 			if commonSciencePacks[sciPackName] then
-				threshold = settingCommonScienceLowerThreshold
+				threshold = storage.settings.commonScienceLowerThreshold
 			else
-				threshold = settingScienceAvailableThreshold
+				threshold = storage.settings.scienceAvailableThreshold
 			end
 			sciPackAvailability[sciPackName].enough = (fracAvailable > threshold)
 		end
@@ -399,13 +393,13 @@ end
 
 local function getTechPriority(tech)
 	-- Returns a number for priority of the tech, based on science packs.
-	if not settingPrioritizeLateGameScience and not settingPrioritizeSpoilableScience then
+	if not storage.settings.prioritizeLateGameScience and not storage.settings.prioritizeSpoilableScience then
 		return 0
 	end
 
 	local priority = 0
 	for _, sciPack in pairs(tech.research_unit_ingredients) do
-		priority = priority + (settingSciencePackPriorities[sciPack.name] or 0)
+		priority = priority + (storage.settings.sciencePackPriorities[sciPack.name] or 0)
 	end
 	return priority
 end
@@ -454,7 +448,7 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 	if targetTechIndex == 1 then return end
 	local queue = force.research_queue
 	local newQueue = {queue[targetTechIndex]}
-	if not settingMoveToBack then
+	if not storage.settings.moveToBack then
 		for i, tech in pairs(queue) do
 			if i ~= targetTechIndex then
 				table.insert(newQueue, tech)
@@ -474,7 +468,7 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 	end
 	force.research_queue = newQueue
 
-	if settingNotifySwitches then
+	if storage.settings.notifySwitches then
 		local newTechName
 		local newTechProto = newQueue[1].prototype
 		if newTechProto.level == newTechProto.max_level then -- Weird inconsistency in whether the localised_name contains the number already or not.
@@ -499,7 +493,7 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 			local switchPriorityDelta = switchTargetPriority - originalPriority
 			local prioritizedSciences = {}
 			for _, sciPack in pairs(annotatedQueue[targetTechIndex].tech.research_unit_ingredients) do
-				local sciPackPriority = settingSciencePackPriorities[sciPack.name] or 0
+				local sciPackPriority = storage.settings.sciencePackPriorities[sciPack.name] or 0
 				if sciPackPriority * 9 >= switchPriorityDelta and sciPackPriority <= switchPriorityDelta * 9 then
 					-- The *9 is because we're adding up priorities that are powers of 10, so eg there could be two sciences with priority 1e6 resulting in total priority of 2e6 plus some remainder smaller than 1e6. Then we want to include all the 1e6 sciences as "reasons" for the switch.
 					-- Note that we subtract out the original priority from the switch target priority, so that we're only looking at the delta. This matters in some cases, eg when switching from tech with {spoilable science} to tech with {spoilable science, late-game science} -- in this case the highest-priority is the spoilable science, but the reason for the switch is the late-game science.
@@ -667,12 +661,14 @@ local function setUpStorage()
 	if storage.lastWarnTimes == nil then storage.lastWarnTimes = {} end
 	if storage.forceSurfaceLabs == nil then storage.forceSurfaceLabs = {} end
 	if storage.someSurfacesInvalidated == nil then storage.someSurfacesInvalidated = {} end
+	-- Runtime settings - refetched at game start or when they're changed, since they can be changed during the game.
+	if storage.settings == nil then storage.settings = {} end
 end
 
 -- On configuration changed, invalidate all forces' caches (so we rebuild the lists), and also refetch settings and set up storage.
 script.on_configuration_changed(function()
-	refetchSettings()
 	setUpStorage()
+	refetchSettings()
 	for _, force in pairs(game.forces) do
 		invalidateLabCache(force)
 	end
@@ -680,8 +676,8 @@ end)
 
 -- On init, fetch settings and set up storage.
 script.on_init(function()
-	refetchSettings()
 	setUpStorage()
+	refetchSettings()
 end)
 
 -- On mod settings changed, refetch settings.
@@ -691,11 +687,11 @@ end)
 
 -- Register command to print out all science pack priorities.
 commands.add_command("science_priorities", nil, function(command)
-	if settingSciencePackPriorities == nil then
+	if storage.settings.sciencePackPriorities == nil then
 		game.print("Science pack priorities not set up yet.")
 		return
 	end
-	for sciPackName, priority in pairs(settingSciencePackPriorities) do
+	for sciPackName, priority in pairs(storage.settings.sciencePackPriorities) do
 		local convertedPriority = -1
 		if priority == 0 then
 			convertedPriority = 0

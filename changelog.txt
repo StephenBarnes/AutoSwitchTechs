@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.8.1
+Date: 2025-07-07
+  Bugfixes:
+    - Fixed bug where settings were not being fetched when game was loaded.
+    - Fixed a bug when some modded science packs are in labs but not in the mod's science pack list.
+    - Fixed a bug where some modded science packs were not being assigned a priority.
+---------------------------------------------------------------------------------------------------
 Version: 1.8.0
 Date: 2025-07-06
   Features:

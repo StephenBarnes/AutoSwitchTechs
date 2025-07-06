@@ -1,41 +1,27 @@
--- Startup settings
-local RUN_EVERY_N_TICKS = 60 * settings.startup["AutoSwitchTechs-run-every-n-seconds"].value
-
--- Runtime settings - refetched at game start or when they're changed, since they can be changed during teh game.
-settingPrioritizeSpoilableScience, settingPrioritizeLateGameScience, settingScienceAvailableThreshold, settingCommonScienceLowerThreshold, settingNotifySwitches, settingShowWarnings, settingWarnEveryNTicks, settingMoveToBack = nil, nil, nil, nil, nil, nil, nil, nil
-local function refetchSettings()
-	local settingsGlobal = settings.global
-	settingPrioritizeSpoilableScience = settingsGlobal["AutoSwitchTechs-prioritize-spoilable-science"].value
-	settingPrioritizeLateGameScience = settingsGlobal["AutoSwitchTechs-prioritize-late-game-science"].value
-	settingScienceAvailableThreshold = settingsGlobal["AutoSwitchTechs-science-available-threshold"].value
-	settingCommonScienceLowerThreshold = settingsGlobal["AutoSwitchTechs-common-science-lower-threshold"].value
-	settingNotifySwitches = settingsGlobal["AutoSwitchTechs-notify-switches"].value
-	settingShowWarnings = settingsGlobal["AutoSwitchTechs-show-warnings"].value
-	settingWarnEveryNTicks = 60 * settingsGlobal["AutoSwitchTechs-warn-every-n-seconds"].value
-	settingMoveToBack = settingsGlobal["AutoSwitchTechs-move-to-back"].value
-end
+local modToSciences = require("common")
 
 -- Constants to hold prototypes we fetch right at the start and then cache.
-local LABS = nil
+local LABS = prototypes.get_entity_filtered({{filter = "type", type = "lab"}})
 ---@type table<string, boolean>
-local SCIENCE_PACKS = nil
+local SCIENCE_PACKS = {}
 ---@type table<string, table<string, boolean>>
-local LAB_ALLOWS_SCIENCE_PACK = nil
-
-local function populateConstants()
-	LABS = prototypes.get_entity_filtered({{filter = "type", type = "lab"}})
-	SCIENCE_PACKS = {}
-	LAB_ALLOWS_SCIENCE_PACK = {}
-	for _, lab in pairs(LABS) do
-		LAB_ALLOWS_SCIENCE_PACK[lab.name] = {}
-		for _, sciPackName in pairs(lab.lab_inputs) do
-			SCIENCE_PACKS[sciPackName] = true
-			LAB_ALLOWS_SCIENCE_PACK[lab.name][sciPackName] = true
-		end
+local LAB_ALLOWS_SCIENCE_PACK = {}
+for _, lab in pairs(LABS) do
+	LAB_ALLOWS_SCIENCE_PACK[lab.name] = {}
+	for _, sciPackName in pairs(lab.lab_inputs) do
+		SCIENCE_PACKS[sciPackName] = true
+		LAB_ALLOWS_SCIENCE_PACK[lab.name][sciPackName] = true
 	end
 end
 
 ------------------------------------------------------------------------
+--- Settings
+
+-- Startup settings
+local RUN_EVERY_N_TICKS = 60 * settings.startup["AutoSwitchTechs-run-every-n-seconds"].value
+
+-- Runtime settings - refetched at game start or when they're changed, since they can be changed during teh game.
+settingPrioritizeSpoilableScience, settingPrioritizeLateGameScience, settingScienceAvailableThreshold, settingCommonScienceLowerThreshold, settingNotifySwitches, settingShowWarnings, settingWarnEveryNTicks, settingMoveToBack, settingSciencePackPriorities = nil, nil, nil, nil, nil, nil, nil, nil, nil
 
 -- Table of priorities used for science packs when late-game priority is enabled. Priority of a tech is sum of priorities of its science packs, so it's determined first by the latest-game science pack and then by the other science packs in order.
 -- TODO I don't like this system. It basically uses decimal numbers to do a kind of digit-wise comparison - like bitwise comparison, except base-10 because we can have multiple science packs with the same priority. Will behave weirdly if you have 10+ science packs at the same priority level. Would be better to just explicitly keep track of all science packs and do the comparisons in a loop.
@@ -48,6 +34,12 @@ local lateGameness = {
 	["ring-science-pack"] = 1e6, -- For Metal and Stars - after nanite science.
 	["anomaly-science-pack"] = 1e6, -- For Metal and Stars - after nanite science.
 	["nanite-science-pack"] = 1e5, -- For Metal and Stars - after space science.
+	["hydraulic-science-pack"] = 1e6, -- For Maraxsis - after Fulgora/Vulcanus/Gleba, also Rubia.
+	["interstellar-science-pack"] = 1e6, -- For Muluna - after Fulgora/Vulcanus/Gleba.
+	["steam-science-pack"] = 0, -- For Lignumis - early-game.
+	["wood-science-pack"] = 0, -- For Lignumis - early-game.
+	["biorecycling-science-pack"] = 1e5, -- For Rubia - after space science.
+	["rubia-biofusion-science-pack"] = 1e5, -- For Rubia - after space science.
 
 	["metallurgic-science-pack"] = 1e5,
 	["electromagnetic-science-pack"] = 1e5,
@@ -59,6 +51,7 @@ local lateGameness = {
 	["military-science-pack"] = 1e1,
 	["logistic-science-pack"] = 1e0,
 	["automation-science-pack"] = 0,
+
 }
 local spoilablePriority = 1e9 -- If using setting to prioritize spoilable science, then they have higher priority than any other science pack.
 local lateGamenessDefault = 1e5 -- If no priority is set, it's probably a planetary science pack from a modded planet, so give it the same priority as the other planetary science packs.
@@ -66,6 +59,12 @@ local lateGamenessDefault = 1e5 -- If no priority is set, it's probably a planet
 local function getSciencePriority(sciPackName)
 	-- Returns a number for priority of the science pack. Higher numbers are higher priority.
 	-- Note this can change in the middle of a game, since we use runtime-global settings for priorities.
+	local setPriority = settings.global["AutoSwitchTechs-override-priority-" .. sciPackName].value
+	if setPriority ~= -1 then
+		if setPriority == 0 then return 0 end
+		return 10 ^ (setPriority - 1)
+	end
+	-- If it's not overridden, determine priority based on settings to prioritize spoilable or late-game science.
 	if settingPrioritizeSpoilableScience then
 		if prototypes.item[sciPackName].get_spoil_ticks() ~= 0 then
 			return spoilablePriority
@@ -76,6 +75,29 @@ local function getSciencePriority(sciPackName)
 	end
 	return 0
 end
+
+local function refetchSettings()
+	local settingsGlobal = settings.global
+	settingPrioritizeSpoilableScience = settingsGlobal["AutoSwitchTechs-prioritize-spoilable-science"].value
+	settingPrioritizeLateGameScience = settingsGlobal["AutoSwitchTechs-prioritize-late-game-science"].value
+	settingScienceAvailableThreshold = settingsGlobal["AutoSwitchTechs-science-available-threshold"].value
+	settingCommonScienceLowerThreshold = settingsGlobal["AutoSwitchTechs-common-science-lower-threshold"].value
+	settingNotifySwitches = settingsGlobal["AutoSwitchTechs-notify-switches"].value
+	settingShowWarnings = settingsGlobal["AutoSwitchTechs-show-warnings"].value
+	settingWarnEveryNTicks = 60 * settingsGlobal["AutoSwitchTechs-warn-every-n-seconds"].value
+	settingMoveToBack = settingsGlobal["AutoSwitchTechs-move-to-back"].value
+	settingSciencePackPriorities = {}
+	for modName, sciencePacks in pairs(modToSciences) do
+		if script.active_mods[modName] then
+			for _, sciencePack in pairs(sciencePacks) do
+				settingSciencePackPriorities[sciencePack] = getSciencePriority(sciencePack)
+			end
+		end
+	end
+end
+
+------------------------------------------------------------------------
+
 
 ------------------------------------------------------------------------
 --- Handling the shortcut button to toggle mod on or off.
@@ -382,7 +404,7 @@ local function getTechPriority(tech)
 
 	local priority = 0
 	for _, sciPack in pairs(tech.research_unit_ingredients) do
-		priority = priority + getSciencePriority(sciPack.name)
+		priority = priority + (settingSciencePackPriorities[sciPack.name] or 0)
 	end
 	return priority
 end
@@ -476,7 +498,7 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 			local switchPriorityDelta = switchTargetPriority - originalPriority
 			local prioritizedSciences = {}
 			for _, sciPack in pairs(annotatedQueue[targetTechIndex].tech.research_unit_ingredients) do
-				local sciPackPriority = getSciencePriority(sciPack.name)
+				local sciPackPriority = settingSciencePackPriorities[sciPack.name] or 0
 				if sciPackPriority * 9 >= switchPriorityDelta and sciPackPriority <= switchPriorityDelta * 9 then
 					-- The *9 is because we're adding up priorities that are powers of 10, so eg there could be two sciences with priority 1e6 resulting in total priority of 2e6 plus some remainder smaller than 1e6. Then we want to include all the 1e6 sciences as "reasons" for the switch.
 					-- Note that we subtract out the original priority from the switch target priority, so that we're only looking at the delta. This matters in some cases, eg when switching from tech with {spoilable science} to tech with {spoilable science, late-game science} -- in this case the highest-priority is the spoilable science, but the reason for the switch is the late-game science.
@@ -597,9 +619,6 @@ local function updateResearchQueueForForce(force)
 end
 
 local function updateResearchQueue(nthTickEventData)
-	if LABS == nil or SCIENCE_PACKS == nil or LAB_ALLOWS_SCIENCE_PACK == nil then
-		populateConstants()
-	end
 	for _, force in pairs(game.forces) do
 		updateResearchQueueForForce(force)
 	end

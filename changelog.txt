@@ -2,6 +2,7 @@
 Version: 1.8.0
 Date: 2025-07-06
   Features:
+    - Add settings to override science pack priorities.
     - Ignore labs that don't have any science packs at all.
     - Ignore labs that need electric power but don't have any.
   Changes:

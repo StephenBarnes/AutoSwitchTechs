@@ -76,4 +76,24 @@ local settings = {
     },
 }
 
+local modToSciences = require("common")
+for modName, sciencePacks in pairs(modToSciences) do
+    if mods[modName] then
+        for _, sciencePack in pairs(sciencePacks) do
+            local setting = {
+                order = getNextOrder(),
+                name = "AutoSwitchTechs-override-priority-" .. sciencePack,
+                type = "int-setting",
+                setting_type = "runtime-global",
+                default_value = -1,
+                minimum_value = -1,
+                maximum_value = 12,
+                localised_name = {"mod-setting-name.AutoSwitchTechs-science-pack-priority-name", sciencePack, {"item-name." .. sciencePack}},
+                localised_description = {"mod-setting-description.AutoSwitchTechs-science-pack-priority-description"}
+            }
+            table.insert(settings, setting)
+        end
+    end
+end
+
 data:extend(settings)

@@ -321,6 +321,8 @@ local function getLabSciencesAvailable(labs, commonSciencePacks)
 			local inventory = lab.get_output_inventory()
 			if inventory == nil then
 				log("ERROR: Null inventory for lab, this shouldn't happen.")
+			elseif inventory.is_empty() then -- Ignore labs that don't have any science packs.
+				goto continue
 			else
 				for i = 1, #inventory do
 					local item = inventory[i]

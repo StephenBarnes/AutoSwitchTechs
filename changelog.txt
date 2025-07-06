@@ -2,7 +2,7 @@
 Version: 1.8.0
 Date: 2025-07-06
   Features:
-    - TODO
+    - Ignore labs that don't have any science packs at all.
   Changes:
     - Toggle is now enabled by default, so the mod is enabled from the start.
 ---------------------------------------------------------------------------------------------------

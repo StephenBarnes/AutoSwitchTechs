@@ -687,3 +687,21 @@ end)
 script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)
 	refetchSettings()
 end)
+
+-- Register command to print out all science pack priorities.
+commands.add_command("science_priorities", nil, function(command)
+	if settingSciencePackPriorities == nil then
+		game.print("Science pack priorities not set up yet.")
+		return
+	end
+	for sciPackName, priority in pairs(settingSciencePackPriorities) do
+		local convertedPriority = -1
+		if priority == 0 then
+			convertedPriority = 0
+		else
+			---@diagnostic disable-next-line: deprecated
+			convertedPriority = math.log10(priority) + 1
+		end
+		game.print(sciPackName .. ": " .. convertedPriority)
+	end
+end)

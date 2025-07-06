@@ -342,6 +342,7 @@ local function getLabSciencesAvailable(labs, commonSciencePacks)
 			-- Ignore labs that are frozen or have no electricity.
 			if lab.frozen then goto continue end
 			if lab.electric_buffer_size ~= nil and lab.electric_buffer_size > 0 and lab.energy == 0 then goto continue end
+			if lab.disabled_by_script or lab.disabled_by_control_behavior then goto continue end
 
 			local inventory = lab.get_output_inventory()
 			if inventory == nil then

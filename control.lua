@@ -1,16 +1,19 @@
 -- Startup settings
 local RUN_EVERY_N_TICKS = 60 * settings.startup["AutoSwitchTechs-run-every-n-seconds"].value
 
--- Runtime settings - functions to fetch settings every time they're needed.
-local settingsGlobal = settings.global
-local function PRIORITIZE_SPOILABLE_SCIENCE() return settingsGlobal["AutoSwitchTechs-prioritize-spoilable-science"].value end
-local function PRIORITIZE_LATE_GAME_SCIENCE() return settingsGlobal["AutoSwitchTechs-prioritize-late-game-science"].value end
-local function SCIENCE_AVAILABLE_THRESHOLD() return settingsGlobal["AutoSwitchTechs-science-available-threshold"].value end
-local function SCIENCE_COMMON_LOWER_THRESHOLD() return settingsGlobal["AutoSwitchTechs-common-science-lower-threshold"].value end
-local function NOTIFY_SWITCHES() return settingsGlobal["AutoSwitchTechs-notify-switches"].value end
-local function SHOW_WARNINGS() return settingsGlobal["AutoSwitchTechs-show-warnings"].value end
-local function WARN_EVERY_N_TICKS() return 60 * settingsGlobal["AutoSwitchTechs-warn-every-n-seconds"].value end
-local function MOVE_TO_BACK() return settingsGlobal["AutoSwitchTechs-move-to-back"].value end
+-- Runtime settings - refetched at game start or when they're changed, since they can be changed during teh game.
+settingPrioritizeSpoilableScience, settingPrioritizeLateGameScience, settingScienceAvailableThreshold, settingCommonScienceLowerThreshold, settingNotifySwitches, settingShowWarnings, settingWarnEveryNTicks, settingMoveToBack = nil, nil, nil, nil, nil, nil, nil, nil
+local function refetchSettings()
+	local settingsGlobal = settings.global
+	settingPrioritizeSpoilableScience = settingsGlobal["AutoSwitchTechs-prioritize-spoilable-science"].value
+	settingPrioritizeLateGameScience = settingsGlobal["AutoSwitchTechs-prioritize-late-game-science"].value
+	settingScienceAvailableThreshold = settingsGlobal["AutoSwitchTechs-science-available-threshold"].value
+	settingCommonScienceLowerThreshold = settingsGlobal["AutoSwitchTechs-common-science-lower-threshold"].value
+	settingNotifySwitches = settingsGlobal["AutoSwitchTechs-notify-switches"].value
+	settingShowWarnings = settingsGlobal["AutoSwitchTechs-show-warnings"].value
+	settingWarnEveryNTicks = 60 * settingsGlobal["AutoSwitchTechs-warn-every-n-seconds"].value
+	settingMoveToBack = settingsGlobal["AutoSwitchTechs-move-to-back"].value
+end
 
 -- Constants to hold prototypes we fetch right at the start and then cache.
 local LABS = nil
@@ -63,25 +66,15 @@ local lateGamenessDefault = 1e5 -- If no priority is set, it's probably a planet
 local function getSciencePriority(sciPackName)
 	-- Returns a number for priority of the science pack. Higher numbers are higher priority.
 	-- Note this can change in the middle of a game, since we use runtime-global settings for priorities.
-	if PRIORITIZE_SPOILABLE_SCIENCE() then
+	if settingPrioritizeSpoilableScience then
 		if prototypes.item[sciPackName].get_spoil_ticks() ~= 0 then
 			return spoilablePriority
 		end
 	end
-	if PRIORITIZE_LATE_GAME_SCIENCE() then
+	if settingPrioritizeLateGameScience then
 		return lateGameness[sciPackName] or lateGamenessDefault -- In Lua, `0 or 100` is 0.
 	end
 	return 0
-end
-
-------------------------------------------------------------------------
-
-local function setUpStorage()
-	if not storage then storage = {} end
-	if storage.shortcutState == nil then storage.shortcutState = {} end
-	if storage.lastWarnTimes == nil then storage.lastWarnTimes = {} end
-	if storage.forceSurfaceLabs == nil then storage.forceSurfaceLabs = {} end
-	if storage.someSurfacesInvalidated == nil then storage.someSurfacesInvalidated = {} end
 end
 
 ------------------------------------------------------------------------
@@ -90,7 +83,6 @@ local shortcutName = "toggle-auto-switch-techs"
 
 ---@param force LuaForce
 local function getShortcutState(force)
-	setUpStorage()
 	local forceId = force.index
 	if storage.shortcutState[forceId] == nil then
 		storage.shortcutState[forceId] = true
@@ -102,7 +94,6 @@ end
 ---@param force LuaForce
 ---@param newState boolean
 local function setShortcutState(force, newState)
-	setUpStorage()
 	storage.shortcutState[force.index] = newState
 	for _, p in pairs(force.players) do
 		p.set_shortcut_toggled(shortcutName, newState)
@@ -153,12 +144,10 @@ end
 ---Functions to issue warnings to player when research queue is empty or has no available techs, etc.
 
 local function getLastWarnTime(force)
-	setUpStorage()
 	return storage.lastWarnTimes[force.index]
 end
 
 local function updateLastWarnTime(force)
-	setUpStorage()
 	storage.lastWarnTimes[force.index] = game.tick
 end
 
@@ -176,9 +165,9 @@ end
 local function canWarnNow(force)
 	-- Returns true if we can issue a warning to the force now, else false.
 	-- There's a setting to not warn more than once every N seconds.
-	if not SHOW_WARNINGS() then return false end
+	if not settingShowWarnings then return false end
 	local lastWarnTime = getLastWarnTime(force)
-	return (lastWarnTime == nil) or (lastWarnTime + WARN_EVERY_N_TICKS() < game.tick)
+	return (lastWarnTime == nil) or (lastWarnTime + settingWarnEveryNTicks < game.tick)
 end
 
 local function warnForce(force, warning, anyLab)
@@ -227,7 +216,6 @@ end
 ---@param force LuaForce
 local function fixInvalidatedSurfaces(force)
 	-- Checks cached lists of labs for the force, and fixes any that have been invalidated (because labs were created or destroyed on that surface) by finding labs on those invalidated surfaces.
-	setUpStorage()
 	local forceIndex = force.index
 	storage.someSurfacesInvalidated[forceIndex] = false
 
@@ -245,7 +233,6 @@ end
 
 local function getLabsOfForce(force)
 	-- Gets table of surface name to labs, using cache. This is faster than findLabsOfForce.
-	setUpStorage()
 	local forceIndex = force.index
 
 	if storage.someSurfacesInvalidated[forceIndex] then
@@ -283,7 +270,6 @@ end
 ---@param surfaceName string|nil
 local function invalidateLabCache(force, surfaceName)
 	-- Clears cache of labs of the force, on one surface or all of them. Called when a lab is built or destroyed.
-	setUpStorage()
 	if force == nil or not force.valid then
 		--If force is invalid/nil, we can't get its index and something has gone very wrong, so just clear the whole cache to be safe.
 		log("ERROR: Force is invalid or nil. Invalidating all lab caches.")
@@ -363,9 +349,9 @@ local function getLabSciencesAvailable(labs, commonSciencePacks)
 			local fracAvailable = vals.labsWithPack / vals.labsAllowingPack
 			local threshold
 			if commonSciencePacks[sciPackName] then
-				threshold = SCIENCE_COMMON_LOWER_THRESHOLD()
+				threshold = settingCommonScienceLowerThreshold
 			else
-				threshold = SCIENCE_AVAILABLE_THRESHOLD()
+				threshold = settingScienceAvailableThreshold
 			end
 			sciPackAvailability[sciPackName].enough = (fracAvailable > threshold)
 		end
@@ -385,7 +371,7 @@ end
 
 local function getTechPriority(tech)
 	-- Returns a number for priority of the tech, based on science packs.
-	if not PRIORITIZE_LATE_GAME_SCIENCE() and not PRIORITIZE_SPOILABLE_SCIENCE() then
+	if not settingPrioritizeLateGameScience and not settingPrioritizeSpoilableScience then
 		return 0
 	end
 
@@ -440,7 +426,7 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 	if targetTechIndex == 1 then return end
 	local queue = force.research_queue
 	local newQueue = {queue[targetTechIndex]}
-	if not MOVE_TO_BACK() then
+	if not settingMoveToBack then
 		for i, tech in pairs(queue) do
 			if i ~= targetTechIndex then
 				table.insert(newQueue, tech)
@@ -460,7 +446,7 @@ local function switchToTech(force, targetTechIndex, anyLab, annotatedQueue, scie
 	end
 	force.research_queue = newQueue
 
-	if NOTIFY_SWITCHES() then
+	if settingNotifySwitches then
 		local newTechName
 		local newTechProto = newQueue[1].prototype
 		if newTechProto.level == newTechProto.max_level then -- Weird inconsistency in whether the localised_name contains the number already or not.
@@ -648,9 +634,32 @@ for _, eventType in pairs({
 		{{ filter = "type", type = "lab" }})
 end
 
--- On configuration changed, invalidate all forces' caches, so we build the lists.
+------------------------------------------------------------------------
+
+local function setUpStorage()
+	if not storage then storage = {} end
+	if storage.shortcutState == nil then storage.shortcutState = {} end
+	if storage.lastWarnTimes == nil then storage.lastWarnTimes = {} end
+	if storage.forceSurfaceLabs == nil then storage.forceSurfaceLabs = {} end
+	if storage.someSurfacesInvalidated == nil then storage.someSurfacesInvalidated = {} end
+end
+
+-- On configuration changed, invalidate all forces' caches (so we rebuild the lists), and also refetch settings and set up storage.
 script.on_configuration_changed(function()
+	refetchSettings()
+	setUpStorage()
 	for _, force in pairs(game.forces) do
 		invalidateLabCache(force)
 	end
+end)
+
+-- On init, fetch settings and set up storage.
+script.on_init(function()
+	refetchSettings()
+	setUpStorage()
+end)
+
+-- On mod settings changed, refetch settings.
+script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)
+	refetchSettings()
 end)

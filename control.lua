@@ -93,8 +93,8 @@ local function getShortcutState(force)
 	setUpStorage()
 	local forceId = force.index
 	if storage.shortcutState[forceId] == nil then
-		storage.shortcutState[forceId] = false
-		return false
+		storage.shortcutState[forceId] = true
+		return true
 	end
 	return storage.shortcutState[forceId]
 end

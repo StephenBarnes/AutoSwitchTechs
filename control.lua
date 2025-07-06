@@ -317,7 +317,10 @@ local function getLabSciencesAvailable(labs, commonSciencePacks)
 				log("ERROR: Invalid lab in call to getLabSciencesAvailable, invalidating lab cache for force.")
 				return nil
 			end
+			-- Ignore labs that are frozen or have no electricity.
 			if lab.frozen then goto continue end
+			if lab.electric_buffer_size ~= nil and lab.electric_buffer_size > 0 and lab.energy == 0 then goto continue end
+
 			local inventory = lab.get_output_inventory()
 			if inventory == nil then
 				log("ERROR: Null inventory for lab, this shouldn't happen.")
